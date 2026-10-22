@@ -99,8 +99,10 @@ them.
   attosecond time, slices, syncs, Z80s stopping between machine cycles),
   `wsg.c` (the Namco WSG), `noise54.c` (the 54xx's noise through two
   band-passes, modelled from MAME's output; 792 samples a frame at 48 kHz)
-- `sim/` (C0-C3) - the game in C, each routine mirroring the ROM's
-  arithmetic and order of stores, against the same addresses
+- `sim/` (C0-C3, under way) - the game in C, each routine mirroring the
+  ROM's arithmetic and order of stores, against the same addresses:
+  `game.c` (the board's memory as the ROMs lay it out, the ROMs' tables),
+  `sound.c` (sub2: the sound driver)
 - `tests/` - C tests, MAME probes (`tests/mame/`)
 - `packaging/` - release layout script, PortMaster launcher and metadata
 - `web/` - page shell for the Emscripten build
@@ -131,7 +133,11 @@ section 4).
   read back (graphics, colours, waveforms, tables) is the ROM set's; the
   font reads the title screen the emulated board draws; no manifest
   without a ROM set
-- `sim`, `routines`, `frame` - label `rom`, with the C game (see the plan)
+- `sim` - label `rom`: every ported routine checked at every call its CPU
+  makes in a 30000-frame scripted run, against a model loaded from the
+  board (what that CPU wrote, its output registers; calls an interrupt
+  broke into, or that read another CPU's changes, skipped)
+- `routines`, `frame` - label `rom`, with the C game (see the plan)
 - `mame_rom_map` - label `mame`: MAME's view of every region equals
   `galaga --dump-rom`
 - `mame_capture` - label `mame`: runs the scripted game in

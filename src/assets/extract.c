@@ -20,7 +20,8 @@ static const struct {
     unsigned first, last;
     const char *what;
 } tables[] = {
-    { 0, 0, NULL }, /* none yet: the C phases add them */
+    { EXTRACT_SUB2_BASE + 0x06DA, EXTRACT_SUB2_BASE + 0x0F5A,
+      "sub2: the sound driver's pitches, glides, sounds, tracks, tempos and notes" },
 };
 #define TABLES ((int)(sizeof tables / sizeof tables[0]))
 

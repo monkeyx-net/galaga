@@ -156,8 +156,9 @@ struct Board {
     int frame_done;
     /* optional: called before each instruction of each CPU (traces) */
     void (*step_hook)(Board *b, int cpu);
-    /* optional: called on every CPU write */
+    /* optional: called on every CPU write, and every Z80 read */
     void (*write_hook)(Board *b, int cpu, uint16_t addr, uint8_t value);
+    void (*read_hook)(Board *b, int cpu, uint16_t addr, uint8_t value);
     void *user;
 };
 

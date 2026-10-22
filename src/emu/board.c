@@ -343,6 +343,7 @@ static uint8_t mem_read(Board *b, int cpu, uint16_t a)
     uint8_t v;
     if (z80_access(b, cpu, &v)) return v;
     v = raw_read(b, cpu, a);
+    if (b->read_hook) b->read_hook(b, cpu, a, v);
     if (b->executing == cpu && b->access < 16) b->part[cpu].value[b->access] = v;
     b->access++;
     return v;

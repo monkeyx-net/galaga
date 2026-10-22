@@ -48,6 +48,8 @@ add_library(galaga_core STATIC
   src/emu/board.c
   src/emu/wsg.c
   src/emu/noise54.c
+  src/sim/game.c
+  src/sim/sound.c
 )
 target_include_directories(galaga_core PUBLIC src)
 target_link_libraries(galaga_core PUBLIC m)
@@ -137,7 +139,10 @@ if(EXISTS "${GALAGA_ROM}")
   add_executable(test_extract src/tests/test_extract.c)
   target_link_libraries(test_extract PRIVATE galaga_core)
   add_test(NAME extract COMMAND test_extract "${GALAGA_ROM}" "${CMAKE_BINARY_DIR}/extract_test")
-  set_tests_properties(rom_load extract PROPERTIES LABELS rom)
+  add_executable(test_sim src/tests/test_sim.c)
+  target_link_libraries(test_sim PRIVATE galaga_core)
+  add_test(NAME sim COMMAND test_sim "${GALAGA_ROM}")
+  set_tests_properties(rom_load extract sim PROPERTIES LABELS rom)
   # Development builds extract the assets next to the program after each build.
   if(NOT CMAKE_CROSSCOMPILING)
     add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/assets/manifest.txt"

@@ -240,6 +240,33 @@ MAME is not quiet, 554 of 555 within 3 dB of its level (the test asks 90%).
   (`galaga_video_load`) for the game in C. Development builds extract to
   `build/assets` after each build.
 
+### 2.3 The programs (C0-, `src/sim/`)
+
+Read from listings built from the board's executed instructions (a Z80
+disassembler over the PCs a 30000-frame scripted run reaches; `build/re`,
+never committed). Each of the three Z80s has its own ROM at $0000 and its
+own stack: main's at $8B00 then $90A0, sub's $9100, sub2's $9B00.
+- main: reset $0000 -> $02C4 (RAM, ROM and video tests from $336C), then
+  the state machine at $02D3 (the attract mode, the game) polling flags
+  the tasks set. IRQ (IM 1, $0038 -> $0237): the stars' latches from
+  $99BE, the watchdog, then the tasks: $9000-$901F a byte each, each one
+  set run through the pointer table at $0096; then the 06xx read of the
+  51xx's three bytes into $99B5 (control $71). NMI ($0066): the 06xx's
+  byte mover (LDI from the queued buffer, then the next queued transfer:
+  $9AB9 sends the 54xx's command from $0092).
+- sub: $0000 -> $057C (its ROM's sum), IRQ ($0038 -> $0513): $92A0
+  counts frames, then 8 tasks at $9020 through the pointers at $003B; the
+  aliens' flight scripts are data from $001D.
+- sub2 (`sim/sound.c`, all ported): $0000 -> $0085: its ROM's sum handed
+  to main at $9101, then everything in the NMI ($0066, lines 64 and 192):
+  the sound driver ($00BB). Sounds are asked for by flags at $9AA0-$9AB6
+  (main and sub set them), started ($9AC0-$9AD6), played from headers at
+  $0734 (first track, tracks, voice), track pointers at $0779 (envelope,
+  decay start, waveform, then notes: pitch nibble, octave nibble, length
+  in units of $07D7's frames a sound), pitches at $06DA, the beam's glide
+  at $06F4 / $0704 by $9211. $9AB7 stops everything, $9AB8 restarts sub2.
+  The WSG's registers are kept at $9A60-$9A72 and copied out each NMI.
+
 To confirm by probe (written up here as confirmed):
 - **High scores:** a top-five table with initials in RAM.
 
@@ -251,7 +278,7 @@ To confirm by probe (written up here as confirmed):
 | E1 | Three Z80s, the MB88xx core (51xx, 54xx), board (shared RAM, latches, 06xx, interrupts, watchdog), video (tiles, sprites, lookups), stars; the game plays via `--emulate` (silent) | `z80`, `mb88`; `mame_emu`: the CPUs cycle for cycle over traced frames; RAM and pictures equal at captured frames (`mame_capture`) | done 2026-10-22 (the 51xx's read-mode select timing aside) |
 | E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | done 2026-10-22 (tables as the C phases need them) |
-| C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | to do |
+| C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | under way: the state, the checker, sub2's sound driver |
 | E3/E4 | Polish (cocktail flip, devices, web), the DIP switches' menu, high-score saving, release | device checklist; published | to do |
 
 Each phase gets its own commit. Nothing is pushed or published without
@@ -290,8 +317,15 @@ asking.
   "GALAGA", "SCORE", "HIGH SCORE" and "CREDIT" off the title screen the
   emulated board draws, each letter of GALAGA its tile's pixels in its
   colour; no manifest without a ROM set
-- `sim` - label `rom`: every ported routine checked at every call the ROMs
-  make in scripted runs, against a model loaded from the board
+- `sim` - label `rom`: a scripted run on the board (30000 frames: the
+  attract mode, coins, a one- and a two-player game). Every ported routine
+  is checked at every call its CPU makes (by CALL, RST or the interrupt
+  for a handler; nested calls too): a model loaded from the board runs
+  the C routine; when the ROM's returns, every address that CPU wrote
+  holds what it last wrote, every other address what it held at entry
+  (bar its stack below the entry SP), and the output registers are the
+  CPU's. Skipped: calls an interrupt broke into, and calls that read
+  something another CPU changed meanwhile (counted)
 - `routines` - label `rom`: ROM routines from random states on the
   emulated Z80 against the C ones
 - `frame` - label `rom`: the C game alone equals the board every frame
