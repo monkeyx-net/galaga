@@ -10,8 +10,10 @@
 
 #include "sim/game.h"
 
-/* $0513: the IRQ */
+/* $0513: the IRQ: its start (the frame counts), then its tasks */
 void sub_irq(Game *g);
+void sub_irq_start(Game *g);
+void sub_irq_tasks(Game *g);
 /* $05BF: the sprites' registers copied to their second bank */
 void sub_sprites(Game *g);
 /* $08D3: the motion of the twelve slots; D, E the registers at entry */

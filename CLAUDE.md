@@ -103,9 +103,10 @@ them.
   ROM's arithmetic and order of stores, against the same addresses:
   `game.c` (the board's memory as the ROMs lay it out, the ROMs' tables),
   `sound.c` (sub2: the sound driver), `sub.c` (sub: the motion, the
-  hits), `irq.c` (main's IRQ and its first tasks), `tasks.c` / `routines.c`
-  (main's other tasks and its subroutines, line by line, named by
-  address), `io.c` (the 06xx's transfers at once; the 51xx's MB8843
+  hits), `tasks.c` / `routines.c` (main's IRQ, its tasks and its
+  subroutines), `fg.c` (main's foreground, resumable) - generated line by
+  line from the ROM's code, counting Z80 cycles, and read; `sim.c` (a frame
+  of the C game), `io.c` (the 06xx's transfers at once; the 51xx's MB8843
   program ported, its loop once a frame), `cpu.h` (registers and flags
   for line-by-line ports)
 - `tests/` - C tests, MAME probes (`tests/mame/`)

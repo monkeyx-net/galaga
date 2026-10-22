@@ -1140,21 +1140,26 @@ void sub_debug(Game *g)
     game_unported(g, 0x0ED0);
 }
 
-void sub_irq(Game *g)
+void sub_irq_start(Game *g)
 {
     WR(0x6821, 0);
-    if (RD(0x6804) & 2) { /* not frozen (DSWA bit 4) */
-        uint8_t n = (uint8_t)(RD(0x92A0) + 1), l = RD(0x92A1), h = RD(0x92A2);
-        WR(0x92A0, n);
-        if ((n & 31) == 1) {
-            h++;
-        } else if (!(n & 31)) {
-            h = (uint8_t)((h | 1) + 1);
-            l++;
-        }
-        WR(0x92A1, l);
-        WR(0x92A2, h);
-        WR(0x92AA, RD(0x9015) & (RD(0x92A7) < RD(0x99C7)));
+    if (!(RD(0x6804) & 2)) return; /* frozen (DSWA bit 4) */
+    uint8_t n = (uint8_t)(RD(0x92A0) + 1), l = RD(0x92A1), h = RD(0x92A2);
+    WR(0x92A0, n);
+    if ((n & 31) == 1) {
+        h++;
+    } else if (!(n & 31)) {
+        h = (uint8_t)((h | 1) + 1);
+        l++;
+    }
+    WR(0x92A1, l);
+    WR(0x92A2, h);
+    WR(0x92AA, RD(0x9015) & (RD(0x92A7) < RD(0x99C7)));
+}
+
+void sub_irq_tasks(Game *g)
+{
+    if (RD(0x6804) & 2) {
         uint8_t c = 0;
         do {
             uint8_t b;
@@ -1175,4 +1180,10 @@ void sub_irq(Game *g)
         } while (!(c & 0xF8));
     }
     WR(0x6821, 1);
+}
+
+void sub_irq(Game *g)
+{
+    sub_irq_start(g);
+    sub_irq_tasks(g);
 }

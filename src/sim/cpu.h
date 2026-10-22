@@ -16,6 +16,11 @@ typedef struct {
     uint8_t a, b, c, d, e, h, l;
     uint8_t cf, zf, sf, hf, nf; /* carry, zero, sign, half carry, subtract */
     uint8_t pf;                 /* P/V, as the block instructions leave it (BC not 0) */
+    uint8_t iff;                /* interrupts enabled (EI / DI) */
+    uint16_t pc;                /* a resumable routine: where it goes on, */
+    uint8_t resume;             /* and at once (1: an EI let the IRQ in) or at its next frame (0) */
+    uint8_t halted;             /* stopped at a HALT until the next interrupt */
+    int64_t t, budget;          /* the Z80 cycles run, and where a resumable routine stops (the next vertical blank) */
     uint16_t ix, iy;
     uint8_t a2, cf2, zf2, sf2, hf2, nf2; /* AF' */
     uint8_t b2, c2, d2, e2, h2, l2;      /* BC', DE', HL' */
@@ -325,15 +330,24 @@ static inline void cpu_ldd(Cpu *z)
     z->hf = z->nf = 0;
     z->pf = BC(z) != 0;
 }
+/* LDIR, LDDR, CPIR whole: 21 cycles a step, 16 the last */
 static inline void cpu_ldir(Cpu *z)
 {
-    do cpu_ldi(z);
-    while (z->pf);
+    for (;;) {
+        cpu_ldi(z);
+        if (!z->pf) break;
+        z->t += 21;
+    }
+    z->t += 16;
 }
 static inline void cpu_lddr(Cpu *z)
 {
-    do cpu_ldd(z);
-    while (z->pf);
+    for (;;) {
+        cpu_ldd(z);
+        if (!z->pf) break;
+        z->t += 21;
+    }
+    z->t += 16;
 }
 static inline void cpu_cpi(Cpu *z)
 {
@@ -347,23 +361,50 @@ static inline void cpu_cpi(Cpu *z)
 }
 static inline void cpu_cpir(Cpu *z)
 {
-    do cpu_cpi(z);
-    while (z->pf && !z->zf);
+    for (;;) {
+        cpu_cpi(z);
+        if (!z->pf || z->zf) break;
+        z->t += 21;
+    }
+    z->t += 16;
 }
 
-/* RST $10 (main's and sub's): HL += A, A the new L */
-static inline void cpu_rst10(Cpu *z)
+/* $0010 (main's and sub's, after its RST): HL += A, A the new L, with the
+   cycles of its ADD A,L / LD L,A / RET NC / INC H / RET */
+static inline void cpu_add_hl_a(Cpu *z)
 {
     cpu_add(z, z->l);
     z->l = z->a;
-    if (z->cf) z->h++;
+    if (z->cf) {
+        z->h++;
+        z->t += 4 + 4 + 5 + 4 + 10;
+    } else {
+        z->t += 4 + 4 + 11;
+    }
 }
-/* RST $08: HL += 2A */
+/* RST $10 */
+static inline void cpu_rst10(Cpu *z)
+{
+    z->t += 11;
+    cpu_add_hl_a(z);
+}
+/* RST $08: HL += 2A ($0008: ADD A,A / JR NC,$0010 / INC H / JP $0010) */
 static inline void cpu_rst08(Cpu *z)
 {
+    z->t += 11;
     cpu_add(z, z->a);
-    if (z->cf) z->h++;
-    cpu_rst10(z);
+    if (z->cf) {
+        z->h++;
+        z->t += 4 + 7 + 4 + 10;
+    } else {
+        z->t += 4 + 12;
+    }
+    cpu_add_hl_a(z);
+}
+/* a word as the CPU reads it */
+static inline uint16_t cpu_rd16(const Cpu *z, uint16_t a)
+{
+    return (uint16_t)(cpu_rd(z, a) | cpu_rd(z, (uint16_t)(a + 1)) << 8);
 }
 
 /* main's $1061 and sub's $0EAE: HL / A (17 steps of ADC A / ADC HL), HL

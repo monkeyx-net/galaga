@@ -637,7 +637,7 @@ void io_transfer(Io *io, Game *g, uint8_t ctrl, uint16_t mem, int n)
         for (int i = 0; i < n && i < 256; i++) game_wr(g, (uint16_t)(mem + i), v[i]);
     } else {
         for (int i = 0; i < n; i++) {
-            uint8_t v = game_rd(g, (uint16_t)(mem + i));
+            uint8_t v = game_rd_main(g, (uint16_t)(mem + i));
             if (ctrl & 1) io_51xx_write(&io->m51, v);
             if ((ctrl & 8) && i < 16) io->noise[i] = v;
         }

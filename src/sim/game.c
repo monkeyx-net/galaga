@@ -1,11 +1,14 @@
 #include "sim/game.h"
 
+#include "sim/io.h"
+
 uint8_t game_rd(const Game *g, uint16_t a)
 {
     if (a >= 0x6800 && a <= 0x6807) {
         int n = a & 7;
         return (uint8_t)((g->dswb >> n & 1) | (g->dswa >> n & 1) << 1);
     }
+    if (a == 0x7100) return g->io ? g->io->ctrl : 0x10;
     if (a >= 0x8000 && a <= 0x87FF) return g->video[a & 0x7FF];
     if (a >= 0x8800 && a <= 0x8BFF) return g->ram[0][a & 0x3FF];
     if (a >= 0x9000 && a <= 0x93FF) return g->ram[1][a & 0x3FF];
@@ -74,3 +77,5 @@ uint8_t game_r(Game *g)
     g->r = (uint8_t)((g->r & 0x80) | ((g->r + 0x35) & 0x7F));
     return g->r;
 }
+
+uint8_t game_rd_main(const Game *g, uint16_t addr) { return addr < 0x4000 ? game_data(g, addr) : game_rd(g, addr); }

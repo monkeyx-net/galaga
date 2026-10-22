@@ -34,6 +34,8 @@ typedef struct {
 #define REGS_SET_DE(r, v) ((r)->d = (uint8_t)((v) >> 8), (r)->e = (uint8_t)(v))
 #define REGS_SET_HL(r, v) ((r)->h = (uint8_t)((v) >> 8), (r)->l = (uint8_t)(v))
 
+struct Io;
+
 typedef struct Game {
     uint8_t video[0x800];    /* $8000: tile codes, then colours */
     uint8_t ram[3][0x400];   /* $8800, $9000, $9800 */
@@ -46,6 +48,7 @@ typedef struct Game {
     uint16_t stalled;        /* the address of a handshake a routine found not yet given, or 0 */
     uint8_t *data_read;      /* optional, for tools: a flag per data byte the game reads */
     uint8_t r;               /* the C game's refresh register: its own count */
+    struct Io *io;           /* the 06xx's customs (sim/io.h), or none */
     /* optional, for tests: the board's refresh register at the LD A,R */
     uint8_t (*r_hook)(void *user);
     /* optional, for tests: called before each write */
@@ -53,8 +56,8 @@ typedef struct Game {
     void *user;
 } Game;
 
-/* A byte as the CPUs read it (the DIP switches at $6800-$6807; 0 where
-   nothing answers). */
+/* A byte as the CPUs read it (the DIP switches at $6800-$6807, the 06xx's
+   control at $7100; 0 where nothing answers). */
 uint8_t game_rd(const Game *g, uint16_t addr);
 /* A byte as the CPUs write it (the latches keep bit 0, the WSG a nibble). */
 void game_wr(Game *g, uint16_t addr, uint8_t value);
@@ -65,6 +68,8 @@ void game_wr16(Game *g, uint16_t addr, uint16_t value);
 void game_fill(Game *g, uint16_t addr, uint8_t value, int n);
 /* LDIR: n bytes from src to dst, one at a time (so overlaps behave as the ROM's). */
 void game_copy(Game *g, uint16_t dst, uint16_t src, int n);
+/* A byte as main reads it: its ROM below $4000 (the tables), else game_rd. */
+uint8_t game_rd_main(const Game *g, uint16_t addr);
 /* A byte of a ROM's tables (data: main $0000, sub GAME_SUB +, sub2 GAME_SUB2 +). */
 uint8_t game_data(const Game *g, unsigned addr);
 
