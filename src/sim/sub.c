@@ -31,42 +31,6 @@ static Cpu cpu(Game *g)
 
 /* ---- arithmetic ----------------------------------------------------------- */
 
-/* $0EAE: HL / A, HL the quotient, A the remainder */
-static void divide(Cpu *z)
-{
-    uint8_t c = z->a, a = 0;
-    int cy = 0;
-    uint16_t hl = HL(z);
-    for (int i = 0; i < 17; i++) {
-        unsigned t = (unsigned)a * 2 + (unsigned)cy;
-        a = (uint8_t)t;
-        if (t > 0xFF) {
-            a = (uint8_t)(a - c);
-            cy = 1;
-        } else if (a < c) {
-            cy = 0;
-        } else {
-            a = (uint8_t)(a - c);
-            cy = 1;
-        }
-        uint32_t n = (uint32_t)hl * 2 + (uint32_t)cy;
-        hl = (uint16_t)n;
-        cy = (int)(n >> 16);
-    }
-    SET_HL(z, hl);
-    z->a = a;
-    z->cf = (uint8_t)cy;
-}
-
-/* $0E9B: HL * A */
-static void multiply(Cpu *z)
-{
-    SET_HL(z, HL(z) * z->a);
-    z->a = 0;
-    z->cf = 0;
-    z->zf = 1;
-}
-
 /* $0E5F: the heading from (H, L) to (D, E): H its octant, L the angle in it */
 static void heading(Cpu *z)
 {
@@ -103,7 +67,7 @@ static void heading(Cpu *z)
     }
     z->h = z->c;
     z->l = 0;
-    divide(z);
+    cpu_divide(z); /* $0EAE */
     if ((z->h ^ z->b) & 1) z->l = (uint8_t)~z->l;
     z->h = z->b;
     z->b = b, z->c = c, z->d = d, z->e = e;
@@ -678,7 +642,7 @@ x0A01:
     if (z->a >= 0x30) z->a = 0x2F;
     z->h = z->a;
     z->a = 6;
-    divide(z);
+    cpu_divide(z); /* $0EAE */
     z->a = (uint8_t)(z->h + 1);
     { uint16_t t = HL(z); SET_HL(z, DE(z)); SET_DE(z, t); }
     cpu_rst10(z);
@@ -790,7 +754,7 @@ x0B16:
     cpu_add(z, 0x0E);
     z->h = z->a;
     z->a = 0x1E;
-    divide(z);
+    cpu_divide(z); /* $0EAE */
     z->a = z->h;
     { uint16_t t = HL(z); SET_HL(z, DE(z)); SET_DE(z, t); }
     cpu_rst10(z);
@@ -988,7 +952,7 @@ x0C2D:
         z->a = z->b;
         z->b = z->h;
         z->h = 0;
-        multiply(z);
+        cpu_multiply(z); /* $0E9B */
         z->a = (uint8_t)((z->b ^ 2) - 1);
         if (z->a & 4) {
             z->b = z->h;
@@ -1096,7 +1060,7 @@ x0D03: /* the sprite's position from the slot's */
         z->a = cpu_rd(z, 0x9215) ? 0x1C : 0x95;
         cpu_sub(z, z->b);
         if (z->cf) cpu_neg(z);
-        divide(z);
+        cpu_divide(z); /* $0EAE */
         {
             uint16_t q = HL(z), r = (uint16_t)(q >> 2);
             r = (uint16_t)((uint16_t)(r + q) >> 2);

@@ -196,8 +196,18 @@ Not yet like MAME:
 - The 51xx's view of its select line in read mode: MAME lets it see a rise
   or fall up to an instruction later than the 06xx's clock edge in some
   transfers, which the board does not model (`mame_emu` reports the 51xx's
-  first different instruction and does not fail on it). What it hands the
-  Z80s, and all memory, is the same.
+  first different instruction and does not fail on it). Measured with the
+  beam position in MAME's traces (a pixel is half a Z80 cycle): MAME's
+  MB88s leave reset a Z80 cycle earlier than its Z80s (the board starts
+  them together), so the edges the board puts 11/12 into an MB88 cycle
+  are a whole MB88 cycle in MAME, a tie its attoseconds settle, and these
+  are the late ones (every one of 84 late edges in 518). Starting the
+  MB88s earlier alone breaks the traces from the start: the ties need
+  MAME's exact edge times. Usually what the 51xx hands the Z80s, and all
+  memory, is the same; at a game's end, as main puts the 51xx back into
+  its credit mode, the board can hand main the bytes one place out (MAME
+  does not), and the game then waits for a start forever. `sim` powers
+  the board on again after each game.
 - The flip ($A007, the cocktail table): to do (E3).
 
 ### 2.1 Sound (E2, measured from MAME's output)

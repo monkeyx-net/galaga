@@ -1,8 +1,8 @@
 /*
  * The C game's routines against the ROMs' on the emulated board (label rom):
  *   test_sim <galaga.zip|folder>
- * Plays a scripted run on the board (the attract mode, coins, a one- and a
- * two-player game) and checks every ported routine each time its CPU runs
+ * Plays a run on the board (an attract cycle, then one- and two-player
+ * games played by a simple player) and checks every ported routine each time its CPU runs
  * it: when the CPU enters the routine (by a CALL or RST, or an interrupt
  * for a handler), a model loaded from the board's memory, latches and the
  * WSG's registers runs the C routine with the CPU's registers; when the
@@ -29,7 +29,8 @@
 #include "sim/sound.h"
 #include "sim/sub.h"
 
-#define FRAMES 30000
+#define FRAMES 40000
+#define ATTRACT 6200 /* one attract cycle, the demo included */
 
 enum { OUT_A = 1, OUT_B = 2, OUT_C = 4, OUT_D = 8, OUT_E = 16, OUT_H = 32, OUT_L = 64 };
 
@@ -293,47 +294,106 @@ static void read_hook(Board *b, int c, uint16_t a, uint8_t v)
     }
     for (int i = 0; i < depth[c]; i++) {
         Check *k = &checks[c][i];
-        if (!k->written[a] && v != k->snapshot[a]) k->raced = 1;
+        if (v != (k->written[a] ? k->value[a] : k->snapshot[a])) k->raced = 1;
     }
 }
 
 /* ---- the run ------------------------------------------------------------------ */
 
-typedef struct {
-    long frame;
-    uint8_t in0, in1;
-} Step;
-static Step steps[8192];
-static int nsteps;
+/* The player: one attract cycle untouched, then games one after another
+   (one player, then two, by turns): coins and a start once the attract
+   mode is on, and in a game the ship steered under the nearest enemy,
+   firing. Its inputs reach the game a frame later, as a probe's would.
+   After each game the board is powered on again: at a game's end the
+   board's 51xx can see a select edge an instruction earlier than MAME's
+   (plan section 2) and hand main its credit bytes out of order, which
+   leaves the game asking for a start that never comes. */
+static int games;      /* games started */
+static int in_game, power_cycle;
+static FILE *script_out;
+static long next_coin; /* the frame of the next game's first coin, or 0 */
 
-static void script(void)
+static void player(void)
 {
-    static const char *const moves[10] = { "left,fire", "right", "fire", "left", "right,fire",
-                                           "fire", "left", "right", "fire,left", "fire,right" };
-    struct { long f; const char *w; } fixed[] = { { 1050, "coin" }, { 1060, "" }, { 1150, "start" }, { 1160, "" } };
-    for (int i = 0; i < 4; i++) {
-        steps[nsteps].frame = fixed[i].f;
-        steps[nsteps].in0 = 0xFF;
-        steps[nsteps].in1 = (uint8_t)~(!strcmp(fixed[i].w, "coin") ? IN1_COIN1 : !strcmp(fixed[i].w, "start") ? IN1_START1 : 0);
-        nsteps++;
+    long f = board.frame;
+    uint8_t in0 = 0xFF, in1 = 0xFF, state = board_peek(&board, 0x9201);
+    static uint8_t was;
+    if (verbose && state != was) fprintf(stderr, "frame %ld: state %d (stage %d)\n", f, state, board_peek(&board, 0x9821));
+    was = state;
+    if (state == 3) in_game = 1;
+    if (in_game && state == 1) { /* the game is over */
+        in_game = 0;
+        power_cycle = 1;
+        goto out;
     }
-    long f = 1400;
-    for (int k = 0; f < FRAMES && nsteps < 8190; k++) {
-        const char *m = moves[k % 10];
-        long hold = 15 + (k * 7) % 25;
-        uint8_t in0 = 0xFF, in1 = 0xFF;
-        if (strstr(m, "left")) in0 &= (uint8_t)~IN0_LEFT1;
-        if (strstr(m, "right")) in0 &= (uint8_t)~IN0_RIGHT1;
-        if (strstr(m, "fire")) in1 &= (uint8_t)~IN1_FIRE1;
-        if (f >= 15000 && f < 15100) { /* two coins and a two-player start */
-            in1 = (uint8_t)~(f < 15010 || (f >= 15030 && f < 15040) ? IN1_COIN1 : 0);
-            in0 = 0xFF;
-            if (f >= 15060) in1 = (uint8_t)~IN1_START2;
+    if (!games && f < ATTRACT) goto out;
+    if (state == 1 && !next_coin) next_coin = f + 60; /* the attract mode: a game next */
+    if (next_coin) {
+        int two = games & 1;
+        long t = f - next_coin;
+        if ((t >= 0 && t < 8) || (two && t >= 30 && t < 38)) in1 &= (uint8_t)~IN1_COIN1;
+        if (t >= 100 && t < 108) in1 &= (uint8_t)~(two ? IN1_START2 : IN1_START1);
+        if (t >= 108) {
+            next_coin = 0;
+            games++;
         }
-        steps[nsteps++] = (Step){ f, in0, in1 };
-        steps[nsteps++] = (Step){ f + hold, 0xFF, 0xFF };
-        f += hold + 5;
+        goto out;
     }
+    /* only while the ship is in play: a button held through the game's end
+       reads as credits (the 51xx still sends the switches) */
+    if (state != 3 || !board_peek(&board, 0x9014)) goto out;
+    {
+        /* the sprites from $8800 (states: $80 free, 4 and 5 exploding); $60-$67
+           the ship and its shots, $68-$77 the bombs. X grows to the right, Y
+           (nine bits) down to the ship's row at $129. */
+        int ship = board_peek(&board, 0x9362), aim = -1, dist = 256, threat = -1, near = 256;
+        for (int l = 0; l < 0x78; l += 2) {
+            if (l >= 0x60 && l < 0x68) continue;
+            uint8_t st = board_peek(&board, (uint16_t)(0x8800 + l));
+            int x = board_peek(&board, (uint16_t)(0x9300 + l));
+            int y = (board_peek(&board, (uint16_t)(0x9B01 + l)) & 1) << 8 | board_peek(&board, (uint16_t)(0x9301 + l));
+            if (st == 0x80 || (st & 0xFE) == 4 || !x) continue;
+            int d = x > ship ? x - ship : ship - x;
+            if (y >= 0xF0 && y < 0x138 && d < 0x18 && d < near) { /* about to reach the ship's row */
+                near = d;
+                threat = x;
+            }
+            if (l < 0x60 && d < dist) {
+                dist = d;
+                aim = x;
+            }
+        }
+        if (threat >= 0) { /* away from it, towards the middle at the edges */
+            if ((threat >= ship && ship > 0x30) || ship > 0xC0) in0 &= (uint8_t)~IN0_LEFT1;
+            else in0 &= (uint8_t)~IN0_RIGHT1;
+        } else if (aim >= 0 && aim + 2 < ship) {
+            in0 &= (uint8_t)~IN0_LEFT1;
+        } else if (aim >= 0 && aim > ship + 2) {
+            in0 &= (uint8_t)~IN0_RIGHT1;
+        }
+        if ((f & 3) < 2) in1 &= (uint8_t)~IN1_FIRE1;
+        if (verbose && f % 100 == 0) {
+            int alive = 0;
+            for (int l = 0; l < 0x60; l += 2) alive += board_peek(&board, (uint16_t)(0x8800 + l)) != 0x80;
+            fprintf(stderr, "  %ld: ship %02X aim %d threat %d alive %d hits %d lives %d\n", f, ship, aim, threat, alive,
+                    board_peek(&board, 0x9844) | board_peek(&board, 0x9845) << 8, board_peek(&board, 0x9820));
+        }
+    }
+out:
+    /* TEST_SIM_SCRIPT: the inputs as a MAME probe's script (frame:inputs) */
+    if (script_out && (in0 != board.in0 || in1 != board.in1)) {
+        fprintf(script_out, "%ld:", f - 1);
+        const char *sep = "";
+        if (!(in1 & IN1_COIN1)) fprintf(script_out, "%scoin", sep), sep = ",";
+        if (!(in1 & IN1_START1)) fprintf(script_out, "%sstart", sep), sep = ",";
+        if (!(in1 & IN1_START2)) fprintf(script_out, "%sstart2", sep), sep = ",";
+        if (!(in0 & IN0_LEFT1)) fprintf(script_out, "%sleft", sep), sep = ",";
+        if (!(in0 & IN0_RIGHT1)) fprintf(script_out, "%sright", sep), sep = ",";
+        if (!(in1 & IN1_FIRE1)) fprintf(script_out, "%sfire", sep);
+        fputc(' ', script_out);
+    }
+    board.in0 = in0;
+    board.in1 = in1;
 }
 
 int main(int argc, char **argv)
@@ -355,19 +415,24 @@ int main(int argc, char **argv)
     memcpy(data + GAME_SUB, rom.sub, ROM_SUB_SIZE);
     memcpy(data + GAME_SUB2, rom.sub2, ROM_SUB2_SIZE);
     verbose = getenv("TEST_SIM_VERBOSE") != NULL;
-    script();
+    if (getenv("TEST_SIM_SCRIPT")) script_out = fopen(getenv("TEST_SIM_SCRIPT"), "w");
     list_addrs();
     board_init(&board, &rom);
     board.step_hook = step_hook;
     board.write_hook = write_hook;
     board.read_hook = read_hook;
-    while (board.frame < FRAMES) {
+    for (long frames = 0; frames < FRAMES; frames++) {
         board_run_frame(&board);
-        for (int i = 0; i < nsteps; i++)
-            if (steps[i].frame == board.frame - 1) {
-                board.in0 = steps[i].in0;
-                board.in1 = steps[i].in1;
-            }
+        player();
+        if (power_cycle) {
+            power_cycle = 0;
+            board_init(&board, &rom);
+            board.step_hook = step_hook;
+            board.write_hook = write_hook;
+            board.read_hook = read_hook;
+            memset(depth, 0, sizeof depth);
+            memset(wsg, 0, sizeof wsg);
+        }
     }
     /* the ROMs' bytes the routines read, as ranges (for the extractor's tables) */
     if (getenv("TEST_SIM_DATA"))
