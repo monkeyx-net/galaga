@@ -43,6 +43,8 @@
 
 #include "assets/rom.h"
 #include "emu/mb88.h"
+#include "emu/noise54.h"
+#include "emu/wsg.h"
 #include "emu/z80.h"
 #include "gfx/galaga.h"
 
@@ -54,6 +56,8 @@ enum { CPU_MAIN, CPU_SUB, CPU_SUB2, CPU_51XX, CPU_54XX };
 #define BOARD_FRAME_CYCLES (BOARD_LINES * BOARD_CYCLES_PER_LINE) /* 50688 */
 #define BOARD_VBLANK_LINE 224                                   /* frames start here */
 #define BOARD_WATCHDOG_FRAMES 8 /* vertical blanks without a write to $6830 reset the board */
+#define BOARD_AUDIO_RATE 48000
+#define BOARD_AUDIO_SAMPLES (BOARD_FRAME_CYCLES / 64) /* 792 a frame */
 
 /* Inputs, active low, as MAME's ports */
 #define IN0_RIGHT1 0x02
@@ -127,7 +131,13 @@ struct Board {
     uint8_t ram[3][0x400];    /* $8800, $9000, $9800 */
     uint8_t misc[8];          /* $6820-$6827, bit 0 */
     uint8_t vlatch[8];        /* $A000-$A007, bit 0 */
-    uint8_t wsg[0x20];        /* $6800-$681F, low nibbles */
+    /* the sound: the WSG and the 54xx's noise; the last frame's samples in
+       audio, made at its end from the writes' times in it */
+    Wsg wsg;
+    Noise54 noise;
+    int16_t audio[BOARD_AUDIO_SAMPLES];
+    struct { int16_t sample; uint8_t reg, value; } sound_events[512]; /* reg $20: the 54xx's O port */
+    int sound_event_count;
     uint8_t in0, in1, dswa, dswb;
     int irq_main, irq_sub;    /* the vertical blank's IRQs, held until cleared */
     int watchdog;             /* vertical blanks since $6830 was last written */

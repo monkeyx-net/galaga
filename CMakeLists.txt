@@ -45,6 +45,8 @@ add_library(galaga_core STATIC
   src/emu/z80.c
   src/emu/mb88.c
   src/emu/board.c
+  src/emu/wsg.c
+  src/emu/noise54.c
 )
 target_include_directories(galaga_core PUBLIC src)
 target_link_libraries(galaga_core PUBLIC m)

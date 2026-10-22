@@ -250,6 +250,45 @@ static uint8_t mcu54_k(void *ctx)
     return b->latch54 >> 4;
 }
 
+/* ---- sound ----------------------------------------------------------------------- */
+
+#define SOUND_O54 0x20
+
+static void sound_event(Board *b, int reg, uint8_t value)
+{
+    if (b->sound_event_count == (int)(sizeof b->sound_events / sizeof b->sound_events[0])) return;
+    int64_t n = at_diff(now(b), b->frame_start) / (64 * Z80_APC);
+    b->sound_events[b->sound_event_count].sample =
+        (int16_t)(n < 0 ? 0 : n >= BOARD_AUDIO_SAMPLES ? BOARD_AUDIO_SAMPLES - 1 : n);
+    b->sound_events[b->sound_event_count].reg = (uint8_t)reg;
+    b->sound_events[b->sound_event_count].value = value;
+    b->sound_event_count++;
+}
+
+static void mcu54_o(void *ctx, uint8_t v) { sound_event(ctx, SOUND_O54, v); }
+
+/* the frame's sound, from the writes' times in it */
+static void make_sound(Board *b)
+{
+    static int32_t mix[BOARD_AUDIO_SAMPLES];
+    memset(mix, 0, sizeof mix);
+    int done = 0;
+    for (int i = 0; i <= b->sound_event_count; i++) {
+        int at = i < b->sound_event_count ? b->sound_events[i].sample : BOARD_AUDIO_SAMPLES;
+        if (at > done) {
+            wsg_render(&b->wsg, mix + done, at - done);
+            noise54_render(&b->noise, mix + done, at - done);
+            done = at;
+        }
+        if (i == b->sound_event_count) break;
+        if (b->sound_events[i].reg == SOUND_O54) noise54_write(&b->noise, b->sound_events[i].value);
+        else wsg_write(&b->wsg, b->sound_events[i].reg, b->sound_events[i].value);
+    }
+    b->sound_event_count = 0;
+    for (int i = 0; i < BOARD_AUDIO_SAMPLES; i++)
+        b->audio[i] = (int16_t)(mix[i] > 32767 ? 32767 : mix[i] < -32768 ? -32768 : mix[i]);
+}
+
 static uint8_t mcu54_r(void *ctx, int port)
 {
     Board *b = ctx;
@@ -366,7 +405,7 @@ static void mem_write(Board *b, int cpu, uint16_t a, uint8_t v)
     if (z80_access(b, cpu, &unused)) return; /* made before the CPU stopped */
     b->access++;
     if (b->write_hook) b->write_hook(b, cpu, a, v);
-    if (a >= 0x6800 && a <= 0x681F) b->wsg[a & 0x1F] = v & 15;
+    if (a >= 0x6800 && a <= 0x681F) sound_event(b, a & 0x1F, v & 15);
     else if (a >= 0x6820 && a <= 0x6827) misc_w(b, a & 7, v);
     else if (a == 0x6830) b->watchdog = 0;
     else if (a >= 0x7000 && a <= 0x70FF) sync_now(b, data_sync, v);
@@ -408,6 +447,7 @@ static void watchdog_reset(Board *b)
 
 static void vblank(Board *b, int unused)
 {
+    make_sound(b);
     b->frame_start = b->timers[T_VBLANK].expire;
     b->frame_done = 1;
     b->star_origin = galaga_star_advance(b->star_origin, b->vlatch);
@@ -464,6 +504,9 @@ void board_init(Board *b, const RomSet *rom)
     b->mcu[1].rom = rom->mcu54;
     b->mcu[1].read_k = mcu54_k;
     b->mcu[1].read_r = mcu54_r;
+    b->mcu[1].write_o = mcu54_o;
+    wsg_init(&b->wsg, rom->namco);
+    noise54_reset(&b->noise);
     for (int i = 0; i < 2; i++) {
         b->mcu[i].ctx = b;
         mb88_reset(&b->mcu[i]);

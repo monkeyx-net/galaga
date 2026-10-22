@@ -64,7 +64,7 @@ emcmake cmake -S . -B build-web && cmake --build build-web --target serve   # we
 
 Release builds: `-DGALAGA_DEV_ASSETS=OFF` (no source-tree fallbacks).
 Until the game is in C, the program runs the ROM on the emulated board
-when it finds the set and the device ROMs (silent until E2), else the test
+(with its sound) when it finds the set and the device ROMs, else the test
 card. Commands for phases not yet done (see the plan's table) arrive with
 them.
 
@@ -93,9 +93,10 @@ them.
   its T-state), `mb88.c` (the MB8843/MB8844 core of the 51xx and 54xx),
   `board.c` (three Z80s, the shared RAM and video RAM, the latches, the
   06xx bus to the 51xx and 54xx, interrupts, the watchdog, the starfield's
-  origin; MAME's scheduler: attosecond time, slices, syncs, Z80s stopping
-  between machine cycles); E2: `wsg.c` (the Namco WSG), `noise54.c` (the
-  54xx's noise through MAME's filters, modelled from its output)
+  origin, the sound's writes timed in the frame; MAME's scheduler:
+  attosecond time, slices, syncs, Z80s stopping between machine cycles),
+  `wsg.c` (the Namco WSG), `noise54.c` (the 54xx's noise through two
+  band-passes, modelled from MAME's output; 792 samples a frame at 48 kHz)
 - `sim/` (C0-C3) - the game in C, each routine mirroring the ROM's
   arithmetic and order of stores, against the same addresses
 - `tests/` - C tests, MAME probes (`tests/mame/`)
@@ -135,7 +136,7 @@ section 4).
   MAME's traces of frames 1700-1800 (main, sub, sub2, 54xx instruction for
   instruction; the 51xx reported only, plan section 2); video RAM, all
   RAM, the latches and every pixel, stars included, at every captured
-  frame
+  frame; the sound against MAME's recording (levels within 3 dB)
 - To debug a difference: `test_emu` with `DUMP_DIR=dir` (its pictures);
   `trace_probe.lua` with `TRACE_CPU`, `TRACE_FROM`/`TRACE_TO` (needs
   `-debug -debugger none`) against `Board.step_hook`; `dasm_probe.lua` for

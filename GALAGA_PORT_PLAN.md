@@ -200,9 +200,33 @@ Not yet like MAME:
   Z80s, and all memory, is the same.
 - The flip ($A007, the cocktail table): to do (E3).
 
+### 2.1 Sound (E2, measured from MAME's output)
+
+`mame_emu` checks the board's sound against MAME's recording of the
+scripted run (`game.wav` from `mame_capture`): in 1/10 s windows where
+MAME is not quiet, 554 of 555 within 3 dB of its level (the test asks 90%).
+- The WSG (`emu/wsg.c`; probe: sub2's NMI held off so the game leaves it
+  alone, the registers set from main's space, one voice at a time): the
+  Pac-Man layout (waveforms at $05/$0A/$0F, voice 0's 20-bit frequency at
+  $10-$14 and volume $15, voices 1 and 2 at $16-$1A and $1B-$1F with their
+  frequency's low nibble 0), each voice's 20-bit accumulator adding its
+  frequency 96000 times a second, its top 5 bits the sample in its
+  waveform (prom-1.1d: 8 of 32 nibbles). Each voice gives (sample - 8) x
+  volume x 48 in MAME's output units, summed, no filter (the DC stays):
+  waveform 0 at volume 1 peaks at +288 and -384, levels linear in volume,
+  0x2000 plays 750 Hz. MAME's resampler smooths it into 48 kHz; the board
+  averages two steps a sample.
+- The 54xx's explosions (`emu/noise54.c`; MAME's output with the WSG's
+  volumes forced to 0 by a write tap): the MCU (already exact) drives two
+  4-bit levels on its O port, its own noise already gated. A linear fit of
+  MAME's output to the board's O port: the low nibble through a band-pass
+  at 182 Hz (Q 2.1, peak 4125 a step), the high nibble at 517 Hz (Q 1.6,
+  986): 86% of its power, every 1/10 s window within 3 dB. The R2 bits it
+  toggles add nothing reliable. The sources are summed.
+- Not modelled: MAME's thump at power-on as its filters charge (the first
+  1/10 s).
+
 To confirm by probe (written up here as confirmed):
-- **Sound:** the WSG's three voices (frequency, volume, waveform from
-  prom-1.1d) and the 54xx's noise through MAME's discrete filters.
 - **High scores:** a top-five table with initials in RAM.
 
 ## 3. Phases
@@ -211,7 +235,7 @@ To confirm by probe (written up here as confirmed):
 |---|---|---|---|
 | P0 | `git init`, skeleton from Galaxian, loader for the galaga set and the device ROMs, test card, MAME ROM map, packaging, CI, `CLAUDE.md`, README | `enhance`, `rom_load`, `mame_rom_map` pass | done 2026-10-22 |
 | E1 | Three Z80s, the MB88xx core (51xx, 54xx), board (shared RAM, latches, 06xx, interrupts, watchdog), video (tiles, sprites, lookups), stars; the game plays via `--emulate` (silent) | `z80`, `mb88`; `mame_emu`: the CPUs cycle for cycle over traced frames; RAM and pictures equal at captured frames (`mame_capture`) | done 2026-10-22 (the 51xx's read-mode select timing aside) |
-| E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | to do |
+| E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | to do |
 | C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | to do |
 | E3/E4 | Polish (cocktail flip, devices, web), the DIP switches' menu, high-score saving, release | device checklist; published | to do |
@@ -243,7 +267,9 @@ asking.
   sub, sub2 and the 54xx instruction for instruction (cycle and registers;
   the 51xx reported only); at every captured frame video RAM, all RAM, the
   latches and the picture, stars included, equal MAME's. `DUMP_DIR` writes
-  the board's pictures. Sound: E2
+  the board's pictures. The sound against MAME's recording of the run
+  (`game.wav`): in 1/10 s windows where MAME is not quiet, at least 90%
+  within 3 dB of its level (section 2.1)
 - `extract` - label `rom`: two extractions are byte-identical; what is
   read back is the ROM set's; the font matches the attract mode's text on
   the emulated board; no manifest without a ROM set

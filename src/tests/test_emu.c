@@ -15,10 +15,15 @@
  *     dir/frame_<n>.txt) and MAME's snapshot (capture dir/<n>.png): the
  *     video RAM, all RAM, the latches, and the picture pixel for pixel,
  *     the stars included.
+ *   - the sound, against MAME's recording of the run (capture dir/game.wav,
+ *     48 kHz), loosely, as the 54xx's noise is modelled from MAME's output
+ *     and MAME smooths the WSG differently: in 1/10 s windows where MAME is
+ *     not quiet, at least 90% have the board's level within 3 dB.
  * MAME's frame callback, where the probes dump, runs at the vertical blank,
  * as the board's frames end. Inputs a MAME probe sets in its frame callback
  * reach the game a frame later. DUMP_DIR=dir writes the board's pictures.
  */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -185,6 +190,75 @@ static int compare_trace(int c)
     return 0;
 }
 
+/* ---- sound ----------------------------------------------------------------- */
+
+static int16_t *ours_audio;
+static long ours_n, ours_cap;
+
+static void keep_audio(void)
+{
+    if (ours_n + BOARD_AUDIO_SAMPLES > ours_cap) {
+        ours_cap = ours_cap ? ours_cap * 2 : 1 << 20;
+        ours_audio = realloc(ours_audio, (size_t)ours_cap * sizeof *ours_audio);
+    }
+    memcpy(ours_audio + ours_n, board.audio, sizeof board.audio);
+    ours_n += BOARD_AUDIO_SAMPLES;
+}
+
+/* a 16-bit mono WAV's samples */
+static int16_t *load_wav(const char *path, long *n)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    uint8_t h[44];
+    if (fread(h, 1, 44, f) != 44 || memcmp(h, "RIFF", 4) || memcmp(h + 8, "WAVE", 4)) {
+        fclose(f);
+        return NULL;
+    }
+    int channels = h[22] | h[23] << 8, bits = h[34] | h[35] << 8;
+    fseek(f, 0, SEEK_END);
+    long bytes = ftell(f) - 44;
+    fseek(f, 44, SEEK_SET);
+    if (channels != 1 || bits != 16 || bytes <= 0) {
+        fclose(f);
+        return NULL;
+    }
+    int16_t *s = malloc((size_t)bytes);
+    *n = (long)fread(s, 2, (size_t)bytes / 2, f);
+    fclose(f);
+    return s;
+}
+
+static double rms(const int16_t *s, long n)
+{
+    double sum = 0;
+    for (long i = 0; i < n; i++) sum += (double)s[i] * s[i];
+    return sqrt(sum / (double)n);
+}
+
+static int compare_sound(const char *path)
+{
+    long n;
+    int16_t *mame_audio = load_wav(path, &n);
+    if (!mame_audio) {
+        printf("sound: no recording (%s)\n", path);
+        return 1;
+    }
+    const long w = BOARD_AUDIO_RATE / 10;
+    long windows = 0, close = 0;
+    for (long at = w; at + w <= n && at + w <= ours_n; at += w) { /* the first window: MAME's filters settling */
+        double m = rms(mame_audio + at, w), o = rms(ours_audio + at, w);
+        if (m < 100) continue;
+        windows++;
+        double db = 20 * log10((o + 1) / (m + 1));
+        if (fabs(db) <= 3) close++;
+        else if (windows - close <= 5) printf("  sound at %.1f s: %.1f dB from MAME's level (%.0f, MAME %.0f)\n", (double)at / BOARD_AUDIO_RATE, db, o, m);
+    }
+    free(mame_audio);
+    printf("sound: %ld of %ld windows within 3 dB of MAME's level\n", close, windows);
+    return !windows || close * 10 < windows * 9;
+}
+
 /* ---- captures -------------------------------------------------------------- */
 
 static int hex(char c)
@@ -311,6 +385,7 @@ int main(int argc, char **argv)
         long frame = atol(argv[i]);
         while (board.frame < frame) {
             board_run_frame(&board);
+            keep_audio();
             inputs(&board);
         }
         char path[1100];
@@ -328,8 +403,12 @@ int main(int argc, char **argv)
     }
     while (board.frame < trace_to) {
         board_run_frame(&board);
+        keep_audio();
         inputs(&board);
     }
+    char wav[1100];
+    snprintf(wav, sizeof wav, "%s/game.wav", argv[3]);
+    if (compare_sound(wav)) failures++;
     for (int c = 0; c < BOARD_CPUS; c++)
         if (traced[c] && compare_trace(c) && c != CPU_51XX) failures++;
     if (failures) {

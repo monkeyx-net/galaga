@@ -1,7 +1,7 @@
 /*
  * Galaga native build: SDL setup and the fixed 60 Hz loop. See GALAGA_PORT_PLAN.md.
  * The ROM's own code runs on the emulated board (src/emu/), a frame per
- * tick (silent so far), when the set and its device ROMs are found; else,
+ * tick, its sound streamed, when the set and its device ROMs are found; else,
  * or with --test-card, the test card (ROM status, an input tester and the
  * graphics presets). The game in C follows (plan section 3).
  *
@@ -218,6 +218,7 @@ static void step(const InputFrame *in)
     if (!g.test_card) {
         board_inputs(in);
         board_run_frame(&g.board);
+        audio_stream(g.board.audio, BOARD_AUDIO_SAMPLES, BOARD_AUDIO_SAMPLES * FRAME_HZ); /* paced by the loop */
     }
     if (in->gfx_next || in->gfx_glow || in->gfx_scanlines) {
         if (in->gfx_next) gfx_next_preset(&g.gfx);
