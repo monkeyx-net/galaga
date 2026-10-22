@@ -15,16 +15,16 @@
 #include "emu/board.h"
 #include "gfx/galaga.h"
 
-/* The programs' tables the game in C reads, by address (tables.txt). */
+/* The programs' bytes the game in C reads, by address (tables.txt). */
 static const struct {
     unsigned first, last;
     const char *what;
 } tables[] = {
-    { EXTRACT_SUB_BASE + 0x001D, EXTRACT_SUB_BASE + 0x0033, "sub: motion scripts" },
-    { EXTRACT_SUB_BASE + 0x003B, EXTRACT_SUB_BASE + 0x0512,
-      "sub: the IRQ's tasks, motion scripts, the formation's offsets by sprite" },
-    { EXTRACT_SUB2_BASE + 0x06DA, EXTRACT_SUB2_BASE + 0x0F5A,
-      "sub2: the sound driver's pitches, glides, sounds, tracks, tempos and notes" },
+    /* whole: past their tables the programs read code as data too (a rank
+       past a table's end, say), and the C game reads what they read */
+    { 0x0000, 0x3FFF, "main: tables and code" },
+    { EXTRACT_SUB_BASE + 0x0000, EXTRACT_SUB_BASE + 0x0FFF, "sub: tables (motion scripts) and code" },
+    { EXTRACT_SUB2_BASE + 0x0000, EXTRACT_SUB2_BASE + 0x0FFF, "sub2: tables (the sound driver's) and code" },
 };
 #define TABLES ((int)(sizeof tables / sizeof tables[0]))
 

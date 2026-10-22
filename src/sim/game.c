@@ -60,3 +60,17 @@ int game_wait(Game *g, uint16_t addr, uint8_t value)
     if (!g->stalled) g->stalled = addr;
     return 1;
 }
+
+int game_wait_for(Game *g, uint16_t addr, uint8_t value)
+{
+    if (game_rd(g, addr) == value) return 0;
+    if (!g->stalled) g->stalled = addr;
+    return 1;
+}
+
+uint8_t game_r(Game *g)
+{
+    if (g->r_hook) return g->r_hook(g->user);
+    g->r = (uint8_t)((g->r & 0x80) | ((g->r + 0x35) & 0x7F));
+    return g->r;
+}

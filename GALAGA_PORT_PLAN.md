@@ -253,10 +253,16 @@ MAME is not quiet, 554 of 555 within 3 dB of its level (the test asks 90%).
 ### 2.3 The programs (C0-, `src/sim/`)
 
 Read from listings built from the board's executed instructions (a Z80
-disassembler over the PCs a 30000-frame scripted run reaches; `build/re`,
-never committed). Each of the three Z80s has its own ROM at $0000 and its
+disassembler over the PCs `sim`'s run reaches, `TEST_SIM_COVER`, and the
+code reachable from them and the jump tables; `build/re`, never
+committed). Routines whose registers and flags carry from block to block
+are ported line by line on `sim/cpu.h`, first drafted by a translator
+there (`build/re/tools/z80c.py`, never committed), then read and checked;
+the reads of R (main's $1000, random numbers) go through `game_r`, which
+the checker feeds the board's values. Each of the three Z80s has its own ROM at $0000 and its
 own stack: main's at $8B00 then $90A0, sub's $9100, sub2's $9B00.
-- main: reset $0000 -> $02C4 (RAM, ROM and video tests from $336C), then
+- main (`sim/irq.c`, `tasks.c`, `routines.c`: the IRQ and its tasks
+  ported): reset $0000 -> $02C4 (RAM, ROM and video tests from $336C), then
   the state machine at $02D3 (the attract mode, the game) polling flags
   the tasks set. IRQ (IM 1, $0038 -> $0237): the stars' latches from
   $99BE, the watchdog, then the tasks: $9000-$901F a byte each, each one
@@ -298,7 +304,7 @@ To confirm by probe (written up here as confirmed):
 | E1 | Three Z80s, the MB88xx core (51xx, 54xx), board (shared RAM, latches, 06xx, interrupts, watchdog), video (tiles, sprites, lookups), stars; the game plays via `--emulate` (silent) | `z80`, `mb88`; `mame_emu`: the CPUs cycle for cycle over traced frames; RAM and pictures equal at captured frames (`mame_capture`) | done 2026-10-22 (the 51xx's read-mode select timing aside) |
 | E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | done 2026-10-22 (tables as the C phases need them) |
-| C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | under way: the state, the checker, sub2's sound driver, sub's IRQ |
+| C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | under way: the state, the checker, sub2's sound driver, sub's IRQ, main's IRQ and tasks |
 | E3/E4 | Polish (cocktail flip, devices, web), the DIP switches' menu, high-score saving, release | device checklist; published | to do |
 
 Each phase gets its own commit. Nothing is pushed or published without

@@ -15,7 +15,11 @@ typedef struct {
     Game *g;
     uint8_t a, b, c, d, e, h, l;
     uint8_t cf, zf, sf, hf, nf; /* carry, zero, sign, half carry, subtract */
+    uint8_t pf;                 /* P/V, as the block instructions leave it (BC not 0) */
     uint16_t ix, iy;
+    uint8_t a2, cf2, zf2, sf2, hf2, nf2; /* AF' */
+    uint8_t b2, c2, d2, e2, h2, l2;      /* BC', DE', HL' */
+    uint16_t sp, stack[32];     /* the stack: PUSH / POP and the return addresses of a resumable routine */
     uint16_t rom;               /* where the CPU's ROM sits in g->data (0, GAME_SUB, GAME_SUB2) */
 } Cpu;
 
@@ -35,6 +39,38 @@ static inline void cpu_ex_de_hl(Cpu *z)
     uint8_t d = z->d, e = z->e;
     z->d = z->h, z->e = z->l;
     z->h = d, z->l = e;
+}
+
+static inline void cpu_ex_af(Cpu *z)
+{
+    uint8_t t;
+#define SWAP(x, y) (t = (x), (x) = (y), (y) = t)
+    SWAP(z->a, z->a2);
+    SWAP(z->cf, z->cf2);
+    SWAP(z->zf, z->zf2);
+    SWAP(z->sf, z->sf2);
+    SWAP(z->hf, z->hf2);
+    SWAP(z->nf, z->nf2);
+}
+static inline void cpu_exx(Cpu *z)
+{
+    uint8_t t;
+    SWAP(z->b, z->b2);
+    SWAP(z->c, z->c2);
+    SWAP(z->d, z->d2);
+    SWAP(z->e, z->e2);
+    SWAP(z->h, z->h2);
+    SWAP(z->l, z->l2);
+#undef SWAP
+}
+/* PUSH / POP of a pair (the values only: the stack is the Cpu's own) */
+static inline void cpu_push(Cpu *z, uint16_t v) { z->stack[z->sp++ & 31] = v; }
+static inline uint16_t cpu_pop(Cpu *z) { return z->stack[--z->sp & 31]; }
+#define AF(z) ((uint16_t)((z)->a << 8 | (z)->sf << 7 | (z)->zf << 6 | (z)->hf << 4 | (z)->nf << 1 | (z)->cf))
+static inline void cpu_set_af(Cpu *z, uint16_t v)
+{
+    z->a = (uint8_t)(v >> 8);
+    z->sf = v >> 7 & 1, z->zf = v >> 6 & 1, z->hf = v >> 4 & 1, z->nf = v >> 1 & 1, z->cf = v & 1;
 }
 
 /* A byte as the CPU reads it: its ROM below $1000 (main's below $4000), the board above */
@@ -268,6 +304,51 @@ static inline uint16_t cpu_sbc16(Cpu *z, uint16_t a, uint16_t b)
     z->zf = (uint16_t)r == 0;
     z->sf = (uint8_t)(r >> 15 & 1);
     return (uint16_t)r;
+}
+
+/* the block instructions */
+static inline void cpu_ldi(Cpu *z)
+{
+    cpu_wr(z, DE(z), cpu_rd(z, HL(z)));
+    SET_HL(z, HL(z) + 1);
+    SET_DE(z, DE(z) + 1);
+    SET_BC(z, BC(z) - 1);
+    z->hf = z->nf = 0;
+    z->pf = BC(z) != 0;
+}
+static inline void cpu_ldd(Cpu *z)
+{
+    cpu_wr(z, DE(z), cpu_rd(z, HL(z)));
+    SET_HL(z, HL(z) - 1);
+    SET_DE(z, DE(z) - 1);
+    SET_BC(z, BC(z) - 1);
+    z->hf = z->nf = 0;
+    z->pf = BC(z) != 0;
+}
+static inline void cpu_ldir(Cpu *z)
+{
+    do cpu_ldi(z);
+    while (z->pf);
+}
+static inline void cpu_lddr(Cpu *z)
+{
+    do cpu_ldd(z);
+    while (z->pf);
+}
+static inline void cpu_cpi(Cpu *z)
+{
+    uint8_t v = cpu_rd(z, HL(z)), r = (uint8_t)(z->a - v);
+    z->hf = ((z->a ^ v ^ r) >> 4) & 1;
+    z->nf = 1;
+    cpu_zs(z, r);
+    SET_HL(z, HL(z) + 1);
+    SET_BC(z, BC(z) - 1);
+    z->pf = BC(z) != 0;
+}
+static inline void cpu_cpir(Cpu *z)
+{
+    do cpu_cpi(z);
+    while (z->pf && !z->zf);
 }
 
 /* RST $10 (main's and sub's): HL += A, A the new L */

@@ -103,7 +103,9 @@ them.
   ROM's arithmetic and order of stores, against the same addresses:
   `game.c` (the board's memory as the ROMs lay it out, the ROMs' tables),
   `sound.c` (sub2: the sound driver), `sub.c` (sub: the motion, the
-  hits), `cpu.h` (registers and flags for line-by-line ports)
+  hits), `irq.c` (main's IRQ and its first tasks), `tasks.c` / `routines.c`
+  (main's other tasks and its subroutines, line by line, named by
+  address), `cpu.h` (registers and flags for line-by-line ports)
 - `tests/` - C tests, MAME probes (`tests/mame/`)
 - `packaging/` - release layout script, PortMaster launcher and metadata
 - `web/` - page shell for the Emscripten build

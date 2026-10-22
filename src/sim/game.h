@@ -45,6 +45,9 @@ typedef struct Game {
     uint16_t unported;       /* the ROM address the C game last reached unported, or 0 */
     uint16_t stalled;        /* the address of a handshake a routine found not yet given, or 0 */
     uint8_t *data_read;      /* optional, for tools: a flag per data byte the game reads */
+    uint8_t r;               /* the C game's refresh register: its own count */
+    /* optional, for tests: the board's refresh register at the LD A,R */
+    uint8_t (*r_hook)(void *user);
     /* optional, for tests: called before each write */
     void (*on_write)(void *user, uint16_t addr, uint8_t value);
     void *user;
@@ -73,6 +76,14 @@ uint8_t game_data(const Game *g, unsigned addr);
    (a handshake). The C game runs the other CPU's part first, so the wait
    is over: 1 (and g->stalled set) if it is not. */
 int game_wait(Game *g, uint16_t addr, uint8_t value);
+/* ... until `addr` holds `value` */
+int game_wait_for(Game *g, uint16_t addr, uint8_t value);
+
+/* The Z80's refresh register as main reads it (LD A,R, in $1000's random
+   numbers): the count of its opcode fetches, which only an emulation of
+   every instruction knows. The tests give the board's through r_hook; the
+   C game makes its own. */
+uint8_t game_r(Game *g);
 
 /* The C game reached ROM code not yet ported: remember where (the caller
    must leave the state unspecified). */
