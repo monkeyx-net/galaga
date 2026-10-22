@@ -1,0 +1,18 @@
+Galaga native SDL2 port
+Copyright 2026 monkeyx-net
+
+The source code of this project is licensed under the Apache License,
+Version 2.0 (see LICENSE).
+
+THIRD-PARTY MATERIAL NOT COVERED BY THAT LICENSE
+
+Galaga (1981) was created and published by Namco (and licensed to Midway
+in North America). The game, its artwork, sounds and data, and the
+GALAGA trademark belong to their current rights holders.
+
+This project contains and distributes no ROM images and no data, graphics
+or sounds taken from them. The program reads the player's own ROM set at
+run time.
+
+This project is not affiliated with or endorsed by Bandai Namco, Midway,
+Warner Bros. or any successor.

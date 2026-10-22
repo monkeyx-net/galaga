@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gameList>
+  <game>
+    <path>./Galaga.sh</path>
+    <name>Galaga</name>
+    <desc>A native SDL2 rebuild of the 1981 Namco arcade game (work in progress). Needs your MAME galaga.zip ROM set in ports/galaga/. Converted by monkeyx.</desc>
+    <releasedate>19810101T000000</releasedate>
+    <developer>Namco</developer>
+    <publisher>Namco / Midway</publisher>
+    <genre>Shooter</genre>
+    <image>./galaga/screenshot.png</image>
+  </game>
+</gameList>

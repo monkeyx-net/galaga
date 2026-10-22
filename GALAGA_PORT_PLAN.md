@@ -1,0 +1,171 @@
+# Galaga native port: plan
+
+A C11 / SDL2 port of Galaga (Namco, 1981; MAME `galaga`, Namco rev. B)
+that plays like the arcade game, for PortMaster handhelds (aarch64),
+desktops (x86_64 Linux, Windows, macOS) and the web. It is converted the
+same way as the sibling Galaxian port (`../galaxian`): emulate the board,
+check the emulator against MAME 0.289, extract the assets once, then
+rewrite the game in C, checked frame by frame against the emulated board.
+
+The repository started on 2026-10-22 as a copy of Galaxian's skeleton
+(platform layer, loaders, framebuffer, enhanced graphics, packaging, CI,
+MAME harness), itself from the Defender, Joust and Robotron ports. The
+hardware (three Z80s, the Namco customs and their MB88xx MCUs, the video,
+the WSG and the 54xx's noise) is new.
+
+## 1. Decisions (2026-10-22)
+
+1. **The ROM set is read once** (as Galaxian's decision 1). The binary
+   never embeds ROM-derived data; it loads it at run time from an `assets/`
+   folder that `galaga --extract <galaga.zip>` writes from the player's
+   own ROM set (the PortMaster launcher runs it on the first start). The
+   repo, CI and releases carry no ROM-derived data: not tiles, sprites, the
+   font, the palette, the colour lookups, the waveforms or tables; the
+   extractor's tables name ROM addresses only. Until the game is in C, the
+   emulated board runs the ROM's code and reads the ROM set.
+2. **MAME is the reference.** Behaviour is established by probing the ROM
+   in MAME 0.289 and checked by CTest against the port. Probes are Lua and
+   only dump; C or CMake compares. Emulation is written from the hardware's
+   behaviour, not from MAME's source.
+3. **Shared code is copied, not linked**, from `../galaxian/src` (renamed
+   galaxian → galaga, GALAXIAN_ → GALAGA_): `platform/`, `gfx/` (bar
+   `galaxian.c`), `assets/` (with a new `rom.c`), `packaging/`, `web/`,
+   CI, the MAME CMake and Lua harness; the Z80 core in E1. Fixes found here
+   that apply there are listed in section 5, to carry across once agreed.
+4. **Controls:** one control panel (the players take turns), as the upright
+   cabinet: left/right and fire. Pad: stick or D-pad left/right, A or B
+   fire; every pad drives the panel. Select = coin, Start = 1P, L1+Start =
+   2P, Select+L1 = graphics presets, hold Select+Start 1 s = exit.
+   Keyboard: arrows left/right, Space/Ctrl fire, 5 coin, 1/Enter and 2
+   start, F3 presets, F4 glow, F5 scanlines, Esc exit. The DIP switches
+   (rank, ships, coinage, bonus, cabinet, demo sound, freeze) come from a
+   settings file (`galaga.cfg`) with MAME's defaults; an operator menu
+   (F2, Select+R1) changes them while the game waits and saves the file.
+5. **Enhanced graphics** as in the Galaxian port (FILTER and HD presets,
+   glow, scanlines), cosmetic only, classic by default. The screen is
+   portrait (224x288, the monitor turned 90 degrees): integer scaling where
+   it fills the screen, else fitted (640x480 handhelds: 1.667x, sharp
+   bilinear, pillarboxed); the scanlines run down the screen.
+6. **The game in C.** The game logic is rewritten in C (`src/sim/`), from
+   the ROM's behaviour (traces, probes, the disassembly MAME writes to
+   `build/re`, never committed), routine by routine, each mirroring the
+   ROM's arithmetic. The emulated board (`src/emu/`, checked against MAME
+   by `mame_emu`) stays as the reference the C game is compared with.
+7. **High-score saving** (a port feature: the arcade forgets its table at
+   power-off): the top five with initials, `galaga.hiscore` in the save
+   folder.
+8. **The device ROMs** (`51xx.bin` from `namco51.zip`, `54xx.bin` from
+   `namco54.zip`, the MB8843 / MB8844 programs of the 51xx and 54xx) are
+   loaded only when present: the emulated board (`--emulate`) runs them
+   on an MB88xx core, and the MAME tests need them. The C game does not:
+   players need only `galaga.zip`. The loader finds them in `galaga.zip`,
+   their own zips next to it, or a folder, by CRC.
+9. **The WSG's waveforms are extracted** (`prom-1.1d`, 8 waveforms of 32
+   4-bit samples): unlike Galaxian's discrete circuit, Galaga's tones are
+   ROM data, so they go to `assets/` with the rest. The 54xx's explosions
+   (its noise through MAME's discrete filters) are modelled from MAME's
+   output, as Galaxian's sound was.
+
+## 2. Hardware
+
+Confirmed so far (MAME 0.289's view, by `-listxml` and probe):
+- ROM set (`rom_load`, `mame_rom_map`), MAME region and offset:
+  - `:maincpu` (16 KB): `gg1_1b.3p` ab036c9f ($0000), `gg1_2b.3m` d9232240
+    ($1000), `gg1_3.2m` 753ce503 ($2000), `gg1_4b.2l` 499fcc76 ($3000)
+  - `:sub` (4 KB): `gg1_5b.3f` bb5caae3; `:sub2` (4 KB): `gg1_7b.2c`
+    d016686b
+  - `:gfx1` (tiles, 4 KB): `gg1_9.4l` 58b2f47c; `:gfx2` (sprites, 8 KB):
+    `gg1_11.4d` ad447c80 ($0000), `gg1_10.4f` dd6f1afc ($1000)
+  - `:proms` (544 bytes): `prom-5.5n` 54603c6b (palette, $000, 32 bytes),
+    `prom-4.2n` 59b6edab (character lookup, $020), `prom-3.1c` 4a04bb6b
+    (sprite lookup, $120)
+  - `:namco` (512 bytes): `prom-1.1d` 7a2815b4 (WSG waveforms, $000),
+    `prom-2.5c` 77245b66 ($100, not used by the sound)
+  - device ROMs: `51xx.bin` c2f57ef8 (`:51xx:mcu`, 1 KB), `54xx.bin`
+    ee7357e0 (`:54xx:mcu`, 1 KB)
+  - MAME's CPU regions are 64 KB (the ROM at the start). Its `:gfx1` is
+    the file with the two 8-byte halves of each tile in $800-$FFF swapped
+    (rearranged at load; probe): the port keeps the file's order, and
+    `rom_map_probe.lua` reads that half back in it.
+- CPUs (`-listxml`): three Z80s (`maincpu`, `sub`, `sub2`) at 3.072 MHz;
+  the 51xx's MB8843 and 54xx's MB8844 at 1.536 MHz. Screen: 288x224
+  visible of 384x264 at 6.144 MHz (60.606 Hz), turned 90 degrees. Sound:
+  the Namco WSG (clock 96 kHz) and a discrete circuit, one channel.
+- DIP switches (MAME's ports DSWA, DSWB; defaults): DSWA difficulty 03
+  (Easy 03 default, Medium 00, Hard 01, Hardest 02), unused 04, demo
+  sounds 08 (on = 0, the default), freeze 10, rack test 20, unused 40,
+  cabinet 80 (upright set). DSWB coinage 07 (1C/1C = 7 default), bonus
+  life 38 (by the lives setting; 20K, 70K, every 70K = 10 by default with
+  3 ships), lives C0 (2 = 00, 3 = 80 default, 4 = 40, 5 = C0). Service
+  mode is IN1 bit 7 (off = set).
+
+To confirm by probe (written up here as confirmed):
+- **Three Z80s** (main 16 KB, sub 4 KB, sub2 4 KB) sharing RAM ($8800,
+  $9000, $9800 blocks) and video RAM ($8000-$87FF). Main and sub take an
+  IRQ at vertical blank, sub2 an NMI twice a frame. The latch at
+  $6820-$6827 holds the IRQ enables, the sub2 NMI's and the sub CPUs'
+  reset; the watchdog at $6830. Interleaving: how often MAME switches CPUs.
+- **Namco customs:** the 06xx bus ($7000-$7100) to the 51xx (MB8843:
+  inputs, coins, credits, its modes) and the 54xx (MB8844: the explosion
+  noise); the 06xx's NMI to the main CPU while a transfer runs. The 05xx
+  draws the starfield ($A000-$A007 control). The 07xx/00xx/04xx/02xx
+  handle tiles and sprites.
+- **Video:** 288x224 rotated, drawn by the port at 224x288 portrait.
+  Tiles 8x8 2bpp (gg1_9) in a 36x28 map with the side columns; sprites
+  16x16 2bpp (gg1_11/10), up to 64, doubled in x and y; colours through
+  the lookup PROMs (prom-4 for tiles, prom-3 for sprites) into the
+  32-colour palette (prom-5). Flip for the cocktail table.
+- **Sound:** the WSG's three voices (frequency, volume, waveform from
+  prom-1.1d) and the 54xx's noise through MAME's discrete filters.
+- **DIP switches** read through $6800-$6807 (a bit of each bank per
+  address).
+- **High scores:** a top-five table with initials in RAM.
+
+## 3. Phases
+
+| Phase | Work | Exit | Status |
+|---|---|---|---|
+| P0 | `git init`, skeleton from Galaxian, loader for the galaga set and the device ROMs, test card, MAME ROM map, packaging, CI, `CLAUDE.md`, README | `enhance`, `rom_load`, `mame_rom_map` pass | done 2026-10-22 |
+| E1 | Three Z80s, the MB88xx core (51xx, 54xx), board (shared RAM, latches, 06xx, interrupts, watchdog), video (tiles, sprites, lookups), stars; the game plays via `--emulate` (silent) | `z80`, `mb88`; `mame_emu`: the CPUs cycle for cycle over traced frames; RAM and pictures equal at captured frames (`mame_capture`) | to do |
+| E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | to do |
+| X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | to do |
+| C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | to do |
+| E3/E4 | Polish (cocktail flip, devices, web), the DIP switches' menu, high-score saving, release | device checklist; published | to do |
+
+Each phase gets its own commit. Nothing is pushed or published without
+asking.
+
+## 4. Tests
+
+- `enhance` - always runs (scalers, presets, glow)
+- `rom_load` - label `rom`: the set from the zip, from renamed copies in a
+  folder (CRC matching), the device ROMs from their zips or the folder
+  and optional, and a clean failure on an empty folder
+- `mame_rom_map` - label `mame`: MAME's view of every region (`:maincpu`,
+  `:sub`, `:sub2`, `:gfx1`, `:gfx2`, `:proms`, `:namco`, the 51xx's and
+  54xx's) equals `galaga --dump-rom`
+- `z80` - always runs: every opcode's T-states and machine cycles, where
+  writes fall, known flag results, NMI, IM 1, HALT (from Galaxian)
+- `mb88` - always runs: the MB88xx opcodes' results, flags, cycles, the
+  ports and timer the 51xx and 54xx use
+- `mame_capture` - label `mame`: a scripted game in MAME (attract mode,
+  coins, start, play), dumping RAM, video RAM and the latches with a
+  snapshot at chosen frames; the static frames drawn from the dump equal
+  MAME's snapshots (bar the stars)
+- `mame_emu` - label `mame`: the board replays the script from power-on:
+  MAME's traces of the three Z80s over a span of frames, cycle for cycle;
+  RAM, video RAM, latches and the picture at every captured frame; the
+  sound against MAME's recording of the run
+- `extract` - label `rom`: two extractions are byte-identical; what is
+  read back is the ROM set's; the font matches the attract mode's text on
+  the emulated board; no manifest without a ROM set
+- `sim` - label `rom`: every ported routine checked at every call the ROMs
+  make in scripted runs, against a model loaded from the board
+- `routines` - label `rom`: ROM routines from random states on the
+  emulated Z80 against the C ones
+- `frame` - label `rom`: the C game alone equals the board every frame
+  through scripted games; it reads only the extracted assets
+
+## 5. For the sibling ports
+
+- (none yet)
