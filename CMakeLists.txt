@@ -54,6 +54,7 @@ add_library(galaga_core STATIC
   src/sim/irq.c
   src/sim/routines.c
   src/sim/tasks.c
+  src/sim/io.c
 )
 target_include_directories(galaga_core PUBLIC src)
 target_link_libraries(galaga_core PUBLIC m)
@@ -146,7 +147,10 @@ if(EXISTS "${GALAGA_ROM}")
   add_executable(test_sim src/tests/test_sim.c)
   target_link_libraries(test_sim PRIVATE galaga_core)
   add_test(NAME sim COMMAND test_sim "${GALAGA_ROM}")
-  set_tests_properties(rom_load extract sim PROPERTIES LABELS rom)
+  add_executable(test_io src/tests/test_io.c)
+  target_link_libraries(test_io PRIVATE galaga_core)
+  add_test(NAME io COMMAND test_io "${GALAGA_ROM}")
+  set_tests_properties(rom_load extract sim io PROPERTIES LABELS rom)
   # Development builds extract the assets next to the program after each build.
   if(NOT CMAKE_CROSSCOMPILING)
     add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/assets/manifest.txt"

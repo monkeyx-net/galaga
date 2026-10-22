@@ -293,6 +293,18 @@ own stack: main's at $8B00 then $90A0, sub's $9100, sub2's $9B00.
   at $06F4 / $0704 by $9211. $9AB7 stops everything, $9AB8 restarts sub2.
   The WSG's registers are kept at $9A60-$9A72 and copied out each NMI.
 
+- the 51xx (`sim/io.c`, ported from its MB8843 program; `io` checks it
+  against the board's): its loop waits on its timer, which the vertical
+  blank clocks, so it runs once a frame, reads the control panel (R0-R3)
+  and fills a buffer of four bytes at RAM 2:4-2:B, which each rise of the
+  select line in read mode puts out in turn (RAM 0:6 the pointer; main
+  reads three, the fourth rise brings it back). In write mode its
+  interrupt sees only a byte's low three bits (its K port): 1 the
+  coinage (the next four bytes to 1:3-1:0, a 0 also setting 1:A), 2
+  credit mode, 5 switch mode (RAM 0:3), 3 / 4 set / clear RAM 0:2; any
+  write resets the pointer. The board's misaligned bytes at a game's end
+  are that pointer a step out.
+
 To confirm by probe (written up here as confirmed):
 - **High scores:** a top-five table with initials in RAM.
 

@@ -105,7 +105,9 @@ them.
   `sound.c` (sub2: the sound driver), `sub.c` (sub: the motion, the
   hits), `irq.c` (main's IRQ and its first tasks), `tasks.c` / `routines.c`
   (main's other tasks and its subroutines, line by line, named by
-  address), `cpu.h` (registers and flags for line-by-line ports)
+  address), `io.c` (the 06xx's transfers at once; the 51xx's MB8843
+  program ported, its loop once a frame), `cpu.h` (registers and flags
+  for line-by-line ports)
 - `tests/` - C tests, MAME probes (`tests/mame/`)
 - `packaging/` - release layout script, PortMaster launcher and metadata
 - `web/` - page shell for the Emscripten build
