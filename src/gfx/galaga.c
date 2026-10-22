@@ -1,5 +1,6 @@
 #include "gfx/galaga.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static uint32_t prom_colour(uint8_t v)
@@ -74,6 +75,67 @@ void galaga_video_init(GalagaVideo *v, const RomSet *rom)
         v->sprite_lookup[i] = rom->proms[0x120 + i] & 15;
     }
     for (int i = 0; i < 32; i++) v->palette[i] = prom_colour(rom->proms[i]);
+}
+
+/* Rows of pens after each "<word> NN" heading in <dir>/gfx/<name> */
+static int load_pens(const char *dir, const char *name, const char *word, uint8_t *pens, int count, int size)
+{
+    char path[1200], line[512];
+    snprintf(path, sizeof path, "%s/gfx/%s", dir, name);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    int got = 0, n = -1, row = 0;
+    size_t wl = strlen(word);
+    while (fgets(line, sizeof line, f)) {
+        unsigned k;
+        if (!strncmp(line, word, wl) && sscanf(line + wl, " %x", &k) == 1 && (int)k < count) {
+            n = (int)k;
+            row = 0;
+            continue;
+        }
+        if (n < 0 || row >= size || line[0] == '#') continue;
+        for (int x = 0; x < size; x++) {
+            if (line[x] < '0' || line[x] > '3') {
+                fclose(f);
+                return -1;
+            }
+            pens[((size_t)n * (size_t)size + (size_t)row) * (size_t)size + (size_t)x] = (uint8_t)(line[x] - '0');
+        }
+        if (++row == size) got++;
+    }
+    fclose(f);
+    return got == count ? 0 : -1;
+}
+
+int galaga_video_load(GalagaVideo *v, const char *dir)
+{
+    memset(v, 0, sizeof *v);
+    make_stars(v);
+    if (load_pens(dir, "tiles.txt", "tile", &v->tiles[0][0][0], GALAGA_TILES, 8) ||
+        load_pens(dir, "sprites.txt", "sprite", &v->sprites[0][0][0], GALAGA_SPRITES, 16))
+        return -1;
+    char path[1200], line[512];
+    snprintf(path, sizeof path, "%s/gfx/palette.txt", dir);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    int colours = 0, lookups = 0;
+    while (fgets(line, sizeof line, f)) {
+        unsigned rgb;
+        if (line[0] == '#') continue;
+        if (colours < 32) {
+            if (sscanf(line, "%6x", &rgb) == 1) v->palette[colours++] = rgb;
+            continue;
+        }
+        for (const char *p = line; *p && *p != '\n' && lookups < 512; p++) {
+            int d = *p >= '0' && *p <= '9' ? *p - '0' : *p >= 'A' && *p <= 'F' ? *p - 'A' + 10 : -1;
+            if (d < 0) break;
+            if (lookups < 256) v->tile_lookup[lookups] = (uint8_t)d;
+            else v->sprite_lookup[lookups - 256] = (uint8_t)d;
+            lookups++;
+        }
+    }
+    fclose(f);
+    return colours == 32 && lookups == 512 ? 0 : -1;
 }
 
 /* the video RAM offset of tile cell (x, y) */

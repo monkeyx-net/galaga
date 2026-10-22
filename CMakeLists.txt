@@ -36,6 +36,7 @@ add_library(galaga_core STATIC
   src/assets/rom.c
   src/assets/assets.c
   src/assets/savefile.c
+  src/assets/extract.c
   src/gfx/fb.c
   src/gfx/blit.c
   src/gfx/scale.c
@@ -133,7 +134,18 @@ if(EXISTS "${GALAGA_ROM}")
   add_executable(test_rom src/tests/test_rom.c)
   target_link_libraries(test_rom PRIVATE galaga_core)
   add_test(NAME rom_load COMMAND test_rom "${GALAGA_ROM}" "${CMAKE_BINARY_DIR}/rom_test")
-  set_tests_properties(rom_load PROPERTIES LABELS rom)
+  add_executable(test_extract src/tests/test_extract.c)
+  target_link_libraries(test_extract PRIVATE galaga_core)
+  add_test(NAME extract COMMAND test_extract "${GALAGA_ROM}" "${CMAKE_BINARY_DIR}/extract_test")
+  set_tests_properties(rom_load extract PROPERTIES LABELS rom)
+  # Development builds extract the assets next to the program after each build.
+  if(NOT CMAKE_CROSSCOMPILING)
+    add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/assets/manifest.txt"
+      COMMAND galaga --extract "${GALAGA_ROM}" "${CMAKE_BINARY_DIR}/assets"
+      DEPENDS galaga
+      COMMENT "Extracting assets from ${GALAGA_ROM}")
+    add_custom_target(assets ALL DEPENDS "${CMAKE_BINARY_DIR}/assets/manifest.txt")
+  endif()
   message(STATUS "ROM set found at ${GALAGA_ROM}: ROM tests enabled")
 else()
   message(STATUS "No ROM set at ${GALAGA_ROM}: ROM tests disabled (put galaga.zip in roms/)")

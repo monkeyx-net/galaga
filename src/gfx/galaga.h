@@ -66,6 +66,9 @@ typedef struct {
 
 /* Decode the graphics and PROMs from the ROM set. */
 void galaga_video_init(GalagaVideo *v, const RomSet *rom);
+/* The same from the extracted assets in dir (gfx/tiles.txt, sprites.txt,
+   palette.txt: assets/extract.h). Returns 0, or -1 if missing or bad. */
+int galaga_video_load(GalagaVideo *v, const char *dir);
 /* Draw a frame into v->screen. */
 void galaga_draw(GalagaVideo *v, const GalagaFrame *f);
 /* The starfield's origin after a vertical blank, from the speed in $A000-$A002. */

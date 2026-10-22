@@ -88,7 +88,9 @@ them.
   its shift register)
 - `assets/` - `rom.c` (the galaga set and the device ROMs from zips or a
   folder, matched by CRC), `zip.c`, `inflate.c`, `png.c`, `assets.c`
-  (asset folder lookup), `savefile.c` (the save folder); `extract.c` (X1)
+  (asset folder lookup), `savefile.c` (the save folder), `extract.c`
+  (tiles, sprites, palette and lookups, font, waveforms, tables, previews;
+  `manifest.txt` written last)
 - `emu/` - the emulated board: `z80.c` (the CPU, each memory access at
   its T-state), `mb88.c` (the MB8843/MB8844 core of the 51xx and 54xx),
   `board.c` (three Z80s, the shared RAM and video RAM, the latches, the
@@ -125,7 +127,11 @@ section 4).
 - `rom_load` - label `rom`: loads the set from the zip, from renamed copies
   in a folder (CRC matching), the device ROMs optional, and fails cleanly
   on an empty folder
-- `extract`, `sim`, `routines`, `frame` - label `rom` (see the plan)
+- `extract` - label `rom`: two extractions are byte-identical; what is
+  read back (graphics, colours, waveforms, tables) is the ROM set's; the
+  font reads the title screen the emulated board draws; no manifest
+  without a ROM set
+- `sim`, `routines`, `frame` - label `rom`, with the C game (see the plan)
 - `mame_rom_map` - label `mame`: MAME's view of every region equals
   `galaga --dump-rom`
 - `mame_capture` - label `mame`: runs the scripted game in

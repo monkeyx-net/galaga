@@ -4,9 +4,11 @@ Galaga (native SDL2 build)
 Converted by monkeyx.
 
 Work in progress. Run ./galaga, or galaga.exe on Windows (add --windowed
-for a window on a desktop). This build shows the test card: the ROM
-status, an input tester and the graphics presets. The emulated Galaga
-board and the game rewritten in C follow.
+for a window on a desktop). This build runs your ROM set's own code on an
+emulated Galaga board (checked against MAME), with its sound; without the
+device ROMs it shows the test card (the ROM status, an input tester and
+the graphics presets). The game rewritten in C follows: it will read only
+the assets ./galaga --extract galaga.zip writes once from your set.
 
 ROM set
   The game needs your own MAME galaga ROM set. Put galaga.zip (or a

@@ -226,6 +226,20 @@ MAME is not quiet, 554 of 555 within 3 dB of its level (the test asks 90%).
 - Not modelled: MAME's thump at power-on as its filters charge (the first
   1/10 s).
 
+### 2.2 The ROM set's data (X1, `extract`)
+
+- `galaga --extract` writes `gfx/tiles.txt` (the 256 tiles as the player
+  sees them), `gfx/sprites.txt` (the 128 sprites), `gfx/palette.txt` (the
+  32 colours through MAME's weights, then the tiles' and sprites' colour
+  lookups), `gfx/font.txt` (the character codes: digits $00-$09, A-Z
+  $0A-$23, a space $24), `sound/waves.txt` (the WSG's 8 waveforms),
+  previews (tiles, sprites, and with the device ROMs the title, score table
+  and demo screens from the emulated board), `tables.txt` (the programs'
+  tables the C game reads: main's, then sub's at +$4000 and sub2's at
+  +$5000; none yet) and `manifest.txt` last. `gfx/galaga.c` reads them back
+  (`galaga_video_load`) for the game in C. Development builds extract to
+  `build/assets` after each build.
+
 To confirm by probe (written up here as confirmed):
 - **High scores:** a top-five table with initials in RAM.
 
@@ -236,7 +250,7 @@ To confirm by probe (written up here as confirmed):
 | P0 | `git init`, skeleton from Galaxian, loader for the galaga set and the device ROMs, test card, MAME ROM map, packaging, CI, `CLAUDE.md`, README | `enhance`, `rom_load`, `mame_rom_map` pass | done 2026-10-22 |
 | E1 | Three Z80s, the MB88xx core (51xx, 54xx), board (shared RAM, latches, 06xx, interrupts, watchdog), video (tiles, sprites, lookups), stars; the game plays via `--emulate` (silent) | `z80`, `mb88`; `mame_emu`: the CPUs cycle for cycle over traced frames; RAM and pictures equal at captured frames (`mame_capture`) | done 2026-10-22 (the 51xx's read-mode select timing aside) |
 | E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | done 2026-10-22 |
-| X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | to do |
+| X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | done 2026-10-22 (tables as the C phases need them) |
 | C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | to do |
 | E3/E4 | Polish (cocktail flip, devices, web), the DIP switches' menu, high-score saving, release | device checklist; published | to do |
 
@@ -270,9 +284,12 @@ asking.
   the board's pictures. The sound against MAME's recording of the run
   (`game.wav`): in 1/10 s windows where MAME is not quiet, at least 90%
   within 3 dB of its level (section 2.1)
-- `extract` - label `rom`: two extractions are byte-identical; what is
-  read back is the ROM set's; the font matches the attract mode's text on
-  the emulated board; no manifest without a ROM set
+- `extract` - label `rom`: two extractions are byte-identical and hold
+  every file; the tiles, sprites, palette, lookups, waveforms and tables
+  read back are the ROM set's; with the device ROMs, the font reads
+  "GALAGA", "SCORE", "HIGH SCORE" and "CREDIT" off the title screen the
+  emulated board draws, each letter of GALAGA its tile's pixels in its
+  colour; no manifest without a ROM set
 - `sim` - label `rom`: every ported routine checked at every call the ROMs
   make in scripted runs, against a model loaded from the board
 - `routines` - label `rom`: ROM routines from random states on the

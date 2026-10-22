@@ -9,6 +9,7 @@
  *          [--frames N] [--screenshot out.png]
  *   galaga --check-rom <dir|zip>
  *   galaga --dump-rom <dir|zip> [region]
+ *   galaga --extract <dir|zip> [<asset dir>]
  *
  * --frames N stops after N updates; with --screenshot the last frame is
  * written as a PNG (use SDL_VIDEODRIVER=dummy to run headless).
@@ -16,6 +17,9 @@
  * region (MAME's names: maincpu sub sub2 gfx1 gfx2 proms namco 51xx 54xx;
  * the device ROMs where found), or of the one named: the format the MAME
  * probe writes (src/tests/mame/rom_map_probe.lua).
+ * --extract writes the graphics, palette, waveforms, font and previews
+ * from the ROM set to an asset folder (default: assets/ next to the
+ * program; assets/extract.h), which the game in C will read instead of it.
  */
 #include <SDL.h>
 #include <stdio.h>
@@ -23,6 +27,7 @@
 #include <string.h>
 
 #include "assets/assets.h"
+#include "assets/extract.h"
 #include "assets/png.h"
 #include "assets/rom.h"
 #include "emu/board.h"
@@ -273,6 +278,30 @@ static int dump_rom(const char *path, const char *only)
     return 0;
 }
 
+static int extract(const char *argv0, const char *rom_path, const char *out_dir)
+{
+    static RomSet rom;
+    char err[512], dir[1024];
+    if (out_dir) snprintf(dir, sizeof dir, "%s", out_dir);
+    else if (getenv("GALAGA_ASSETS")) snprintf(dir, sizeof dir, "%s", getenv("GALAGA_ASSETS"));
+    else {
+        snprintf(dir, sizeof dir, "%s", argv0);
+        char *slash = strrchr(dir, '/');
+#ifdef _WIN32
+        char *bslash = strrchr(dir, '\\');
+        if (bslash > slash) slash = bslash;
+#endif
+        if (slash) snprintf(slash, sizeof dir - (size_t)(slash - dir), "/assets");
+        else snprintf(dir, sizeof dir, "assets");
+    }
+    if (rom_load(&rom, rom_path, err, sizeof err) || extract_all(&rom, dir, err, sizeof err)) {
+        fprintf(stderr, "galaga: %s\n", err);
+        return 1;
+    }
+    printf("galaga: assets extracted to %s\n", dir);
+    return 0;
+}
+
 static int save_screenshot(const char *path)
 {
     static uint8_t rgba[FB_HEIGHT * FB_MAX_SCALE * FB_WIDTH * FB_MAX_SCALE * 4];
@@ -343,6 +372,7 @@ int main(int argc, char **argv)
     const char *rom_arg = NULL;
     if (argc == 3 && !strcmp(argv[1], "--check-rom")) return check_rom(argv[2]);
     if ((argc == 3 || argc == 4) && !strcmp(argv[1], "--dump-rom")) return dump_rom(argv[2], argc == 4 ? argv[3] : NULL);
+    if ((argc == 3 || argc == 4) && !strcmp(argv[1], "--extract")) return extract(argv[0], argv[2], argc == 4 ? argv[3] : NULL);
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--windowed")) windowed = true;
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) max_frames = strtol(argv[++i], NULL, 10);
@@ -360,8 +390,9 @@ int main(int argc, char **argv)
                     "usage: %s [--windowed] [--gfx preset] [--rom path] [--test-card] [--emulate]\n"
                     "          [--frames N] [--screenshot out.png]\n"
                     "       %s --check-rom <dir|zip>\n"
-                    "       %s --dump-rom <dir|zip> [region]\n",
-                    argv[0], argv[0], argv[0]);
+                    "       %s --dump-rom <dir|zip> [region]\n"
+                    "       %s --extract <dir|zip> [<asset dir>]\n",
+                    argv[0], argv[0], argv[0], argv[0]);
             return 2;
         }
     }
