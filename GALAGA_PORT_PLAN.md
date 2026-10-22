@@ -99,26 +99,110 @@ Confirmed so far (MAME 0.289's view, by `-listxml` and probe):
   3 ships), lives C0 (2 = 00, 3 = 80 default, 4 = 40, 5 = C0). Service
   mode is IN1 bit 7 (off = set).
 
+Confirmed in E1 (`mame_emu`: the three Z80s and the 54xx instruction for
+instruction over 100 frames of play, cycles and registers; video RAM,
+all RAM, the latches and every pixel, stars included, at 15 frames from
+power-on to over a minute of play):
+- Memory map (probe of MAME's address maps; the same for the three Z80s):
+  ROM $0000-$3FFF (sub and sub2: 4 KB, then 0), DIP switches $6800-$6807
+  (bit 0: DSWB bit n, bit 1: DSWA bit n; the rest 0), the WSG $6800-$681F
+  (writes), the misc latch $6820-$6827 (bit 0), the watchdog $6830, the
+  06xx data $7000-$70FF and control $7100, video RAM $8000-$87FF, RAM
+  $8800-$8BFF, $9000-$93FF, $9800-$9BFF, the video latch $A000-$A007 (bit
+  0). Unmapped reads give 0.
+- Power-on: main runs (AF $0040, IX = IY = $FFFF, the rest 0); sub, sub2
+  and both MCUs are held in reset until $6823 = 1, which main writes at
+  frame 699 after its RAM test. Released, a CPU starts at the scheduler's
+  time (it kept none while held).
+- Interrupts: at the vertical blank (line 224, where frames start) main
+  and sub get an IRQ (IM 1) if $6820 / $6821 is set, held until 0 is
+  written there; sub2 gets an NMI at lines 64 and 192 unless $6822 is set.
+- The 06xx: a control write (bits 0-3 chips, 51xx = 0, 54xx = 3; bit 4
+  read; bits 5-7 n) starts a clock of period 64 << n CPU cycles at the next
+  edge of its 48 kHz clock (edges at k / 48000 s); control $x0 stops it.
+  The select lines are high for the first half of each period; main gets
+  an NMI at each rise (read mode: from the second). A data write latches
+  the byte in each selected chip; a read returns the selected chip's O port
+  and latches that too. The 51xx's K port is (read bit << 3) | latch bits
+  0-2, the 54xx's K its latch's high nibble and R0 its low. Control and data
+  writes take effect at a sync (below).
+- The 51xx: R0-R3 = IN0 low, IN0 high, IN1 low, IN1 high (active low); its
+  timer counts vertical blanks; it answers on O. The 54xx drives the noise
+  (E2).
+- The MB88xx (both MCUs, 1.536 MHz / 6): MAME's traces of both, replayed
+  through the core with their port reads, match every register. The PC
+  counts on into the next page (JMP stays in its page); the external
+  interrupt is taken after the instruction under way, in 3 cycles, to
+  $002 with ST set; NF follows the pin; the serial unit (SF) is not
+  modelled (unread).
+- The Z80, beyond Galaxian's core: LDIR / LDDR / CPIR / CPDR going round
+  again take X and Y from the instruction's address bits 11 and 13; SCF and
+  CCF take them from (Q xor F) or A, Q being F when the last instruction
+  set the flags.
+- Watchdog (probe: main halted): the 8th vertical blank without a write to
+  $6830 resets the board: main from that vertical blank, the latches
+  cleared (so the others go back into reset), the 06xx stopped; RAM kept.
+- Video (`gfx/galaga.c`; `mame_capture` and `mame_emu`): 224x288 portrait.
+  Tiles: rows 2-33 at $040 + (27 - x) x 32 + (y - 2), rows 0-1 and 34-35 at
+  $3C0 / $3E0 / $000 / $020 + 29 - x, colour at +$400; a tile's pixel (px,
+  py) is bits 3 - py % 4 and 7 - py % 4 of byte 7 - px (+8 when py < 4).
+  Sprites (64; $8B80 code and colour, $9380 position, $9B80 flags, + 2i):
+  16x16, pixel (px, py) from byte (15 - px, or 24 + 15 - px past 8) + 8
+  (py / 4); at x = byte 0 - 17, y = byte 1 + 256 x ($9B81 bit 0) - 40;
+  flags bit 0 flips top to bottom, bit 1 left to right, bit 2 doubles
+  down, bit 3 across (code bit 0 the lower half, bit 1 the left, each
+  turned by its flip). Colour c, pen p: tiles prom-4[4c + p] into palette
+  16-31, sprites prom-3[4c + p] into 0-15; 15 transparent. Palette:
+  red and green bits weigh 33, 71, 151; blue 81, 174. Tiles over sprites
+  over stars. MAME draws the frame at the vertical blank from memory then.
+- Stars (the 05xx; identified from MAME's pictures: every star of the
+  65535-step cycle, then the one 16-bit register that gives them): a
+  shift register taking in at bit 15 the parity of bits 0, 3, 5 and 10;
+  256 steps a line along y 16-271, lines from x 223 down to 0. A step is a
+  star when bits 0, 3, 5, 10 are clear and 12-15 set; colour red ~bits 6,
+  7, green ~bits 8, 1, blue ~bits 2, 4 (0, $47, $97, $DE; blue 0, $51, $AE,
+  $FF); shown when $A003 (bit 11 clear) or $A004 (set) equals bit 9, with
+  $A005 set. At each vertical blank the origin moves -1, -2, -3, -4, +3,
+  +2, +1 or 0 steps by $A000-$A002 (shown or not); at power-on it is 1579
+  steps on from where the register holds 1 (MAME's).
+- Inputs a MAME probe sets in its frame callback reach the game a frame
+  later.
+
+How MAME runs the board, which the board copies to be equal to it
+instruction for instruction (each point found where a trace differed):
+- Time in attoseconds: the Z80's cycle 325520833333 (1 / 3.072 MHz,
+  truncated), the MCU's a hair under 12 of those (1 to 4096 as under fit
+  every run so far; the board uses 1); the frame 384 x 264 pixels of
+  162760416666; slices of 1/6000 s.
+- Each slice runs main, sub, sub2, 51xx, 54xx to its end (a timer's time
+  if sooner); a CPU's cycles to run are its time to the end divided by its
+  cycle cut to 32 bits (MAME's divisor, which rounds up a hair short of a
+  whole cycle); a CPU ending short of the end (its slice aborted, or the
+  MCUs on their 12-cycle grid) brings the end back to its time for the
+  CPUs after it. A timer that becomes the next due while a CPU runs aborts
+  its slice.
+- A write that changes another CPU's lines ($6820/$6821 clears, $6823) or
+  the 06xx (control, data) syncs: it takes effect at a timer at the
+  writer's time, once the others have caught up; the writer's slice ends
+  there. Timer callbacks see their own time as now.
+- A Z80 stops between machine cycles when its cycles run out: an access
+  whose machine cycle would start later waits for its next slice, after
+  the other CPUs (the board re-runs the instruction then, replaying the
+  accesses already made).
+- The 50 Hz sound update (MAME's) and screen line 0 are timers too: they
+  cut slices.
+
+Not yet like MAME:
+- The 51xx's view of its select line in read mode: MAME lets it see a rise
+  or fall up to an instruction later than the 06xx's clock edge in some
+  transfers, which the board does not model (`mame_emu` reports the 51xx's
+  first different instruction and does not fail on it). What it hands the
+  Z80s, and all memory, is the same.
+- The flip ($A007, the cocktail table): to do (E3).
+
 To confirm by probe (written up here as confirmed):
-- **Three Z80s** (main 16 KB, sub 4 KB, sub2 4 KB) sharing RAM ($8800,
-  $9000, $9800 blocks) and video RAM ($8000-$87FF). Main and sub take an
-  IRQ at vertical blank, sub2 an NMI twice a frame. The latch at
-  $6820-$6827 holds the IRQ enables, the sub2 NMI's and the sub CPUs'
-  reset; the watchdog at $6830. Interleaving: how often MAME switches CPUs.
-- **Namco customs:** the 06xx bus ($7000-$7100) to the 51xx (MB8843:
-  inputs, coins, credits, its modes) and the 54xx (MB8844: the explosion
-  noise); the 06xx's NMI to the main CPU while a transfer runs. The 05xx
-  draws the starfield ($A000-$A007 control). The 07xx/00xx/04xx/02xx
-  handle tiles and sprites.
-- **Video:** 288x224 rotated, drawn by the port at 224x288 portrait.
-  Tiles 8x8 2bpp (gg1_9) in a 36x28 map with the side columns; sprites
-  16x16 2bpp (gg1_11/10), up to 64, doubled in x and y; colours through
-  the lookup PROMs (prom-4 for tiles, prom-3 for sprites) into the
-  32-colour palette (prom-5). Flip for the cocktail table.
 - **Sound:** the WSG's three voices (frequency, volume, waveform from
   prom-1.1d) and the 54xx's noise through MAME's discrete filters.
-- **DIP switches** read through $6800-$6807 (a bit of each bank per
-  address).
 - **High scores:** a top-five table with initials in RAM.
 
 ## 3. Phases
@@ -126,7 +210,7 @@ To confirm by probe (written up here as confirmed):
 | Phase | Work | Exit | Status |
 |---|---|---|---|
 | P0 | `git init`, skeleton from Galaxian, loader for the galaga set and the device ROMs, test card, MAME ROM map, packaging, CI, `CLAUDE.md`, README | `enhance`, `rom_load`, `mame_rom_map` pass | done 2026-10-22 |
-| E1 | Three Z80s, the MB88xx core (51xx, 54xx), board (shared RAM, latches, 06xx, interrupts, watchdog), video (tiles, sprites, lookups), stars; the game plays via `--emulate` (silent) | `z80`, `mb88`; `mame_emu`: the CPUs cycle for cycle over traced frames; RAM and pictures equal at captured frames (`mame_capture`) | to do |
+| E1 | Three Z80s, the MB88xx core (51xx, 54xx), board (shared RAM, latches, 06xx, interrupts, watchdog), video (tiles, sprites, lookups), stars; the game plays via `--emulate` (silent) | `z80`, `mb88`; `mame_emu`: the CPUs cycle for cycle over traced frames; RAM and pictures equal at captured frames (`mame_capture`) | done 2026-10-22 (the 51xx's read-mode select timing aside) |
 | E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | to do |
 | X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | to do |
 | C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | to do |
@@ -146,16 +230,20 @@ asking.
   54xx's) equals `galaga --dump-rom`
 - `z80` - always runs: every opcode's T-states and machine cycles, where
   writes fall, known flag results, NMI, IM 1, HALT (from Galaxian)
-- `mb88` - always runs: the MB88xx opcodes' results, flags, cycles, the
-  ports and timer the 51xx and 54xx use
-- `mame_capture` - label `mame`: a scripted game in MAME (attract mode,
-  coins, start, play), dumping RAM, video RAM and the latches with a
-  snapshot at chosen frames; the static frames drawn from the dump equal
-  MAME's snapshots (bar the stars)
+- `mb88` - always runs: the MB88xx opcodes' results, flags (ST, Z, C),
+  cycles; paging, JPA, CALL / RTS / RTI; the ports; the interrupt (after
+  the instruction under way, 3 cycles, NF following the pin); the timer
+- `mame_capture` - label `mame`: a scripted game in MAME
+  (`src/tests/mame/script.cmake`: power-on, the attract mode, a coin, a
+  start, over a minute of play), dumping video RAM, RAM and the latches
+  with a snapshot at 15 frames; each frame drawn from the dump equals
+  MAME's snapshot (bar the stars, whose origin is not dumped)
 - `mame_emu` - label `mame`: the board replays the script from power-on:
-  MAME's traces of the three Z80s over a span of frames, cycle for cycle;
-  RAM, video RAM, latches and the picture at every captured frame; the
-  sound against MAME's recording of the run
+  MAME's traces of frames 1700-1800 (`trace_probe.lua`, a CPU a run): main,
+  sub, sub2 and the 54xx instruction for instruction (cycle and registers;
+  the 51xx reported only); at every captured frame video RAM, all RAM, the
+  latches and the picture, stars included, equal MAME's. `DUMP_DIR` writes
+  the board's pictures. Sound: E2
 - `extract` - label `rom`: two extractions are byte-identical; what is
   read back is the ROM set's; the font matches the attract mode's text on
   the emulated board; no manifest without a ROM set
@@ -168,4 +256,9 @@ asking.
 
 ## 5. For the sibling ports
 
-- (none yet)
+- The Z80 core: LDIR / LDDR / CPIR / CPDR going round again take X and Y
+  from the instruction's address (MAME, after the 2018 findings); SCF and
+  CCF take them through Q. Galaxian's ROM may never show either.
+- Galaxian's "MAME raises the NMI a cycle before the line starts" may be
+  MAME's scheduler: its divisor rounding, its slices, and the Z80 stopping
+  between machine cycles (section 2) are worth trying there.

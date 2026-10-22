@@ -94,7 +94,7 @@ jobs:
           cmake -S . -B build -DGALAGA_DEV_ASSETS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache
           cmake --build build -j
 
-      # CI has no ROM set, so only the always-run tests (enhance)
+      # CI has no ROM set, so only the always-run tests (enhance, z80, mb88)
       - name: Test
         working-directory: build
         run: ctest --output-on-failure
@@ -175,7 +175,7 @@ jobs:
           cmake -S . -B build -DGALAGA_DEV_ASSETS=OFF -DCMAKE_C_COMPILER_LAUNCHER=ccache
           cmake --build build -j
 
-      # CI has no ROM set, so only the always-run tests (enhance)
+      # CI has no ROM set, so only the always-run tests (enhance, z80, mb88)
       - name: Test
         working-directory: build
         run: ctest --output-on-failure

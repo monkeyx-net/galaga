@@ -63,17 +63,18 @@ emcmake cmake -S . -B build-web && cmake --build build-web --target serve   # we
 ```
 
 Release builds: `-DGALAGA_DEV_ASSETS=OFF` (no source-tree fallbacks).
-`--input script.txt` replays controls (lines of
-`<frame> [coin] [start] [start2] [left] [right] [fire] [up] [down] [menu]`).
-Commands for phases not yet done (see the plan's table) arrive with them.
+Until the game is in C, the program runs the ROM on the emulated board
+when it finds the set and the device ROMs (silent until E2), else the test
+card. Commands for phases not yet done (see the plan's table) arrive with
+them.
 
 ## Layout (`src/`)
 
-- `main.c` - SDL setup, the fixed 60 Hz loop, the graphics pipeline, the
-  test card (`--test-card`, or no ROM set), `--frames`, `--screenshot`,
-  `--rom`, `--check-rom`, `--dump-rom`; later the board or the C game a
-  frame per tick, the DIP switches (`galaga.cfg`), the high scores
-  (`galaga.hiscore`)
+- `main.c` - SDL setup, the fixed 60 Hz loop running a board frame per
+  tick (`--emulate`; the C game later), the graphics pipeline, the test
+  card (`--test-card`, or no ROM set or device ROMs), `--frames`,
+  `--screenshot`, `--rom`, `--check-rom`, `--dump-rom`; later the DIP
+  switches (`galaga.cfg`), the high scores (`galaga.hiscore`)
 - `platform/` - the only code that includes SDL: `video.c` (224x288
   portrait framebuffer, integer scaling or fitted with sharp bilinear,
   scanlines down the screen), `input.c` (Galaga's control panel; pads and
@@ -81,17 +82,20 @@ Commands for phases not yet done (see the plan's table) arrive with them.
 - `gfx/` - draws into the framebuffer in arcade coordinates (`fb.scale` > 1
   for HD): `fb.c`, `blit.c`, `scale.c` (Scale2x/3x, xBR), `enhance.c`
   (graphics presets, HD image registry, whole-frame filter, glow),
-  `debugfont.c` (3x5 font for diagnostics, not the ROM's); `galaga.c`
-  (E1: tiles, sprites, stars, the PROM colours)
+  `debugfont.c` (3x5 font for diagnostics, not the ROM's), `galaga.c`
+  (a frame from the video RAM, sprite RAM and latches: tiles, sprites
+  with their flips and doubling, the PROM colours, the 05xx's stars from
+  its shift register)
 - `assets/` - `rom.c` (the galaga set and the device ROMs from zips or a
   folder, matched by CRC), `zip.c`, `inflate.c`, `png.c`, `assets.c`
   (asset folder lookup), `savefile.c` (the save folder); `extract.c` (X1)
-- `emu/` (E1-E2) - the emulated board: `z80.c` (the CPU, each memory
-  access at its T-state), `mb88.c` (the MB8843/MB8844 core of the 51xx
-  and 54xx), `board.c` (three Z80s, the shared RAM and video RAM, the
-  latches, the 06xx bus to the 51xx and 54xx, interrupts, the watchdog),
-  `wsg.c` (the Namco WSG), `noise54.c` (the 54xx's noise through MAME's
-  filters, modelled from its output)
+- `emu/` - the emulated board: `z80.c` (the CPU, each memory access at
+  its T-state), `mb88.c` (the MB8843/MB8844 core of the 51xx and 54xx),
+  `board.c` (three Z80s, the shared RAM and video RAM, the latches, the
+  06xx bus to the 51xx and 54xx, interrupts, the watchdog, the starfield's
+  origin; MAME's scheduler: attosecond time, slices, syncs, Z80s stopping
+  between machine cycles); E2: `wsg.c` (the Namco WSG), `noise54.c` (the
+  54xx's noise through MAME's filters, modelled from its output)
 - `sim/` (C0-C3) - the game in C, each routine mirroring the ROM's
   arithmetic and order of stores, against the same addresses
 - `tests/` - C tests, MAME probes (`tests/mame/`)
@@ -123,12 +127,21 @@ section 4).
 - `extract`, `sim`, `routines`, `frame` - label `rom` (see the plan)
 - `mame_rom_map` - label `mame`: MAME's view of every region equals
   `galaga --dump-rom`
-- `mame_capture`, `mame_emu` - label `mame`: a scripted game in MAME,
-  dumped and snapshotted; the board replays it from power-on (traces,
-  memory, pictures, sound)
-- Traces, dumps and disassembly stay in `build/`. MAME tests share
-  `build/mame` (one at a time); tests that run the game use their own save
-  dir; never write to the user's home folder.
+- `mame_capture` - label `mame`: runs the scripted game in
+  `src/tests/mame/script.cmake`, dumping video RAM, RAM and the latches
+  with a snapshot at 15 frames; each frame drawn from its dump equals
+  MAME's (bar the stars)
+- `mame_emu` - label `mame`: the board replays that script from power-on:
+  MAME's traces of frames 1700-1800 (main, sub, sub2, 54xx instruction for
+  instruction; the 51xx reported only, plan section 2); video RAM, all
+  RAM, the latches and every pixel, stars included, at every captured
+  frame
+- To debug a difference: `test_emu` with `DUMP_DIR=dir` (its pictures);
+  `trace_probe.lua` with `TRACE_CPU`, `TRACE_FROM`/`TRACE_TO` (needs
+  `-debug -debugger none`) against `Board.step_hook`; `dasm_probe.lua` for
+  the five programs' disassembly. Traces, dumps and disassembly stay in
+  `build/`. MAME tests share `build/mame` (one at a time); tests that run
+  the game use their own save dir; never write to the user's home folder.
 
 ## Reference
 

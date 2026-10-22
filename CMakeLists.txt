@@ -41,6 +41,10 @@ add_library(galaga_core STATIC
   src/gfx/scale.c
   src/gfx/enhance.c
   src/gfx/debugfont.c
+  src/gfx/galaga.c
+  src/emu/z80.c
+  src/emu/mb88.c
+  src/emu/board.c
 )
 target_include_directories(galaga_core PUBLIC src)
 target_link_libraries(galaga_core PUBLIC m)
@@ -112,6 +116,16 @@ enable_testing()
 add_executable(test_enhance src/tests/test_enhance.c)
 target_link_libraries(test_enhance PRIVATE galaga_core)
 add_test(NAME enhance COMMAND test_enhance)
+add_executable(test_z80 src/tests/test_z80.c)
+target_link_libraries(test_z80 PRIVATE galaga_core)
+add_test(NAME z80 COMMAND test_z80)
+add_executable(test_mb88 src/tests/test_mb88.c)
+target_link_libraries(test_mb88 PRIVATE galaga_core)
+add_test(NAME mb88 COMMAND test_mb88)
+add_executable(test_capture src/tests/test_capture.c)
+target_link_libraries(test_capture PRIVATE galaga_core)
+add_executable(test_emu src/tests/test_emu.c)
+target_link_libraries(test_emu PRIVATE galaga_core)
 
 if(EXISTS "${GALAGA_ROM}")
   add_executable(test_rom src/tests/test_rom.c)
@@ -133,6 +147,16 @@ if(MAME_EXECUTABLE AND EXISTS "${GALAGA_ROM}")
       -DPROBE=${CMAKE_SOURCE_DIR}/src/tests/mame/rom_map_probe.lua
       -P ${CMAKE_SOURCE_DIR}/src/tests/mame/rom_map.cmake)
   set_tests_properties(mame_rom_map PROPERTIES LABELS mame TIMEOUT 300 RESOURCE_LOCK mame_workdir)
+  add_test(NAME mame_capture
+    COMMAND ${CMAKE_COMMAND} -DMAME=${MAME_EXECUTABLE} -DROMPATH=${rom_parent} -DWORKDIR=${CMAKE_BINARY_DIR}/mame
+      -DROM=${GALAGA_ROM} -DPROBE=${CMAKE_SOURCE_DIR}/src/tests/mame/capture_probe.lua -DCHECK=$<TARGET_FILE:test_capture>
+      -P ${CMAKE_SOURCE_DIR}/src/tests/mame/capture.cmake)
+  add_test(NAME mame_emu
+    COMMAND ${CMAKE_COMMAND} -DMAME=${MAME_EXECUTABLE} -DROMPATH=${rom_parent} -DWORKDIR=${CMAKE_BINARY_DIR}/mame
+      -DROM=${GALAGA_ROM} -DPROBE=${CMAKE_SOURCE_DIR}/src/tests/mame/trace_probe.lua -DCHECK=$<TARGET_FILE:test_emu>
+      -P ${CMAKE_SOURCE_DIR}/src/tests/mame/emu.cmake)
+  set_tests_properties(mame_capture PROPERTIES LABELS mame TIMEOUT 600 RESOURCE_LOCK mame_workdir)
+  set_tests_properties(mame_emu PROPERTIES LABELS mame TIMEOUT 1800 RESOURCE_LOCK mame_workdir DEPENDS mame_capture)
   message(STATUS "MAME reference tests enabled (${MAME_EXECUTABLE})")
 else()
   message(STATUS "MAME reference tests disabled (need mame and ${GALAGA_ROM})")

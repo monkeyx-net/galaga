@@ -1,9 +1,11 @@
 /*
  * Galaga native build: SDL setup and the fixed 60 Hz loop. See GALAGA_PORT_PLAN.md.
- * Phase P0: the test card (ROM status, an input tester and the graphics
- * presets); the emulated board and the game in C follow (plan section 3).
+ * The ROM's own code runs on the emulated board (src/emu/), a frame per
+ * tick (silent so far), when the set and its device ROMs are found; else,
+ * or with --test-card, the test card (ROM status, an input tester and the
+ * graphics presets). The game in C follows (plan section 3).
  *
- *   galaga [--windowed] [--gfx preset] [--rom path] [--test-card]
+ *   galaga [--windowed] [--gfx preset] [--rom path] [--test-card] [--emulate]
  *          [--frames N] [--screenshot out.png]
  *   galaga --check-rom <dir|zip>
  *   galaga --dump-rom <dir|zip> [region]
@@ -23,10 +25,12 @@
 #include "assets/assets.h"
 #include "assets/png.h"
 #include "assets/rom.h"
+#include "emu/board.h"
 #include "gfx/blit.h"
 #include "gfx/debugfont.h"
 #include "gfx/enhance.h"
 #include "gfx/fb.h"
+#include "gfx/galaga.h"
 #include "platform/audio.h"
 #include "platform/input.h"
 #include "platform/video.h"
@@ -62,6 +66,9 @@ typedef struct {
     char rom_error[256];
     char assets_path[1024]; /* the extracted assets, or "" */
     RomSet rom;
+    int test_card;          /* the test card, not the board */
+    Board board;
+    GalagaVideo video;
 } Port;
 
 static Port g;
@@ -145,12 +152,37 @@ static void draw_scene(Framebuffer *t)
 
 /* Classic: the arcade frame. HD: drawn at the render scale. FILTER: the arcade
    frame upscaled whole. Glow goes over whichever is shown. */
+/* The board's picture into the arcade framebuffer */
+static void draw_board(Framebuffer *t)
+{
+    Board *b = &g.board;
+    GalagaFrame fr = { b->video, { b->ram[0], b->ram[1], b->ram[2] }, b->vlatch, b->star_origin };
+    galaga_draw(&g.video, &fr);
+    for (int y = 0; y < FB_HEIGHT; y++) {
+        uint32_t *row = fb_row(t, y);
+        for (int x = 0; x < FB_WIDTH; x++) row[x] = 0xFF000000u | g.video.screen[y][x];
+    }
+}
+
 static void draw(int display_scale)
 {
     const GfxSettings *gs = &g.gfx;
     const Scaler scaler = gs->smooth ? SCALER_SMOOTH : SCALER_CRISP;
     const int s = gfx_render_scale(gs, display_scale);
     shown = &fb;
+    if (!g.test_card) { /* only pixels: HD upscales them like FILTER */
+        draw_board(&fb);
+        if (g.gfx_notice > 0) {
+            char text[80];
+            snprintf(text, sizeof text, "GRAPHICS: %s", gfx_describe(&g.gfx));
+            fill_rectf(&fb, 0, FB_HEIGHT - 9, FB_WIDTH, 9, 0x000000);
+            centred(&fb, FB_HEIGHT - 7, text, YELLOW);
+        }
+        if (gs->mode != GFX_CLASSIC && !fb_init(&fb_big, s) && !enhance_filter_frame(&fb, &fb_big, scaler))
+            shown = &fb_big;
+        if (gs->glow) enhance_glow(shown);
+        return;
+    }
     if (gs->mode == GFX_HD && !fb_init(&fb_big, s) && !enhance_prepare(s, scaler)) {
         draw_scene(&fb_big);
         shown = &fb_big;
@@ -162,6 +194,20 @@ static void draw(int display_scale)
     if (gs->glow) enhance_glow(shown);
 }
 
+/* The panel to the board's switches (active low) */
+static void board_inputs(const InputFrame *in)
+{
+    uint8_t in0 = 0xFF, in1 = 0xFF;
+    if (in->move_x < 0) in0 &= (uint8_t)~IN0_LEFT1;
+    if (in->move_x > 0) in0 &= (uint8_t)~IN0_RIGHT1;
+    if (in->fire) in1 &= (uint8_t)~IN1_FIRE1;
+    if (in->coin) in1 &= (uint8_t)~IN1_COIN1;
+    if (in->start) in1 &= (uint8_t)~IN1_START1;
+    if (in->start2) in1 &= (uint8_t)~IN1_START2;
+    g.board.in0 = in0;
+    g.board.in1 = in1;
+}
+
 static void step(const InputFrame *in)
 {
     static bool coin_was;
@@ -169,6 +215,10 @@ static void step(const InputFrame *in)
     g.in = *in;
     if (in->coin && !coin_was) g.coins++;
     coin_was = in->coin;
+    if (!g.test_card) {
+        board_inputs(in);
+        board_run_frame(&g.board);
+    }
     if (in->gfx_next || in->gfx_glow || in->gfx_scanlines) {
         if (in->gfx_next) gfx_next_preset(&g.gfx);
         if (in->gfx_glow) g.gfx.glow = !g.gfx.glow;
@@ -288,7 +338,7 @@ static void web_frame(void) { run_once(); }
 
 int main(int argc, char **argv)
 {
-    bool windowed = false;
+    bool windowed = false, want_card = false, want_board = false;
     const char *rom_arg = NULL;
     if (argc == 3 && !strcmp(argv[1], "--check-rom")) return check_rom(argv[2]);
     if ((argc == 3 || argc == 4) && !strcmp(argv[1], "--dump-rom")) return dump_rom(argv[2], argc == 4 ? argv[3] : NULL);
@@ -297,7 +347,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) max_frames = strtol(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) screenshot = argv[++i];
         else if (!strcmp(argv[i], "--rom") && i + 1 < argc) rom_arg = argv[++i];
-        else if (!strcmp(argv[i], "--test-card")) {} /* the only screen so far */
+        else if (!strcmp(argv[i], "--test-card")) want_card = true;
+        else if (!strcmp(argv[i], "--emulate")) want_board = true;
         else if (!strcmp(argv[i], "--gfx") && i + 1 < argc) {
             if (gfx_parse(argv[++i], &g.gfx)) {
                 fprintf(stderr, "galaga: unknown --gfx preset '%s' (one of: %s)\n", argv[i], gfx_preset_names());
@@ -305,7 +356,7 @@ int main(int argc, char **argv)
             }
         } else {
             fprintf(stderr,
-                    "usage: %s [--windowed] [--gfx preset] [--rom path] [--test-card]\n"
+                    "usage: %s [--windowed] [--gfx preset] [--rom path] [--test-card] [--emulate]\n"
                     "          [--frames N] [--screenshot out.png]\n"
                     "       %s --check-rom <dir|zip>\n"
                     "       %s --dump-rom <dir|zip> [region]\n",
@@ -323,6 +374,19 @@ int main(int argc, char **argv)
     if (g.rom_path[0] && rom_load(&g.rom, g.rom_path, g.rom_error, sizeof g.rom_error))
         fprintf(stderr, "galaga: %s\n", g.rom_error);
     if (assets_find(argv[0], "manifest.txt", g.assets_path, sizeof g.assets_path)) g.assets_path[0] = '\0';
+    g.test_card = 1;
+    if (!want_card && g.rom.loaded) {
+        if (g.rom.has_51xx && g.rom.has_54xx) {
+            g.test_card = 0;
+            galaga_video_init(&g.video, &g.rom);
+            board_init(&g.board, &g.rom);
+        } else {
+            fprintf(stderr, "galaga: the emulated board needs the device ROMs: namco51.zip and namco54.zip next to %s\n",
+                    g.rom_path);
+        }
+    } else if (want_board && !g.rom.loaded) {
+        fprintf(stderr, "galaga: --emulate needs the ROM set\n");
+    }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {
         SDL_Log("SDL_Init: %s", SDL_GetError());
