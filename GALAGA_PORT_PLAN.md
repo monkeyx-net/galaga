@@ -254,9 +254,19 @@ own stack: main's at $8B00 then $90A0, sub's $9100, sub2's $9B00.
   51xx's three bytes into $99B5 (control $71). NMI ($0066): the 06xx's
   byte mover (LDI from the queued buffer, then the next queued transfer:
   $9AB9 sends the 54xx's command from $0092).
-- sub: $0000 -> $057C (its ROM's sum), IRQ ($0038 -> $0513): $92A0
-  counts frames, then 8 tasks at $9020 through the pointers at $003B; the
-  aliens' flight scripts are data from $001D.
+- sub (`sim/sub.c`, the IRQ ported): $0000 -> $057C (its ROM's sum), IRQ
+  ($0038 -> $0513): $92A0 counts frames, then 8 tasks at $9020 through
+  the pointers at $003B (a task's byte is its step to the next): the
+  sprites' registers copied to their shown bank ($05BF; waits on main's
+  $92D6), the motion ($08D3: twelve 20-byte slots at $9100, each with a
+  script in sub's ROM from $001D, steps of speeds / turn / frames and
+  commands $EF-$FF; positions 8.8, a 10-bit heading, a sprite frame from
+  it; homing to the formation by offsets from $0100; bombs aimed at the
+  ship), the shots ($06F5) and the ship ($05EE) against the sprites, the
+  hits ($07C2: points, sounds, the boss's two hits, the captured ship).
+  $0ECA (DSWA bit 2 off) reads where nothing answers and restarts the CPU.
+  Its code carries registers and flags from block to block, so it is
+  ported line by line (`sim/cpu.h`: the registers and the flags tested).
 - sub2 (`sim/sound.c`, all ported): $0000 -> $0085: its ROM's sum handed
   to main at $9101, then everything in the NMI ($0066, lines 64 and 192):
   the sound driver ($00BB). Sounds are asked for by flags at $9AA0-$9AB6
@@ -278,7 +288,7 @@ To confirm by probe (written up here as confirmed):
 | E1 | Three Z80s, the MB88xx core (51xx, 54xx), board (shared RAM, latches, 06xx, interrupts, watchdog), video (tiles, sprites, lookups), stars; the game plays via `--emulate` (silent) | `z80`, `mb88`; `mame_emu`: the CPUs cycle for cycle over traced frames; RAM and pictures equal at captured frames (`mame_capture`) | done 2026-10-22 (the 51xx's read-mode select timing aside) |
 | E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | done 2026-10-22 (tables as the C phases need them) |
-| C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | under way: the state, the checker, sub2's sound driver |
+| C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | under way: the state, the checker, sub2's sound driver, sub's IRQ |
 | E3/E4 | Polish (cocktail flip, devices, web), the DIP switches' menu, high-score saving, release | device checklist; published | to do |
 
 Each phase gets its own commit. Nothing is pushed or published without

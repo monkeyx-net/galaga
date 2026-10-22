@@ -13,17 +13,21 @@
  * checked too. Checks
  * are skipped where an interrupt broke into the routine, or where the CPU
  * read something another CPU had changed since the entry (the model reads
- * the old value); calls a C routine reports reaching unported code are
- * counted apart.
+ * the old value), bar the handshakes a CPU waits on (the model reads the
+ * value the CPU left its wait on); calls a C routine reports reaching
+ * unported code are counted apart. The ROMs' bytes the routines read must
+ * all be among the tables the extractor writes.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "assets/extract.h"
 #include "assets/rom.h"
 #include "emu/board.h"
 #include "sim/game.h"
 #include "sim/sound.h"
+#include "sim/sub.h"
 
 #define FRAMES 30000
 
@@ -44,19 +48,43 @@ typedef struct {
 
 static void a_sound_nmi(Game *g, Regs *r) { sound_nmi(g); }
 static void a_sound_work(Game *g, Regs *r) { sound_work(g); }
+static void a_sub_irq(Game *g, Regs *r) { sub_irq(g); }
+static void a_sub_sprites(Game *g, Regs *r) { sub_sprites(g); }
+static void a_sub_motion(Game *g, Regs *r) { sub_motion(g, r->d, r->e); }
+static void a_sub_shots(Game *g, Regs *r) { sub_shots(g); }
+static void a_sub_ship(Game *g, Regs *r) { sub_ship(g); }
+static void a_sub_debug(Game *g, Regs *r) { sub_debug(g); }
 
 #define R(cpu, addr, name, fn, outputs, interrupt) { cpu, addr, name, fn, outputs, interrupt, 0, 0, 0, 0, 0 }
 static Routine routines[] = {
     R(CPU_SUB2, 0x0066, "sound NMI", a_sound_nmi, 0, 1),
     R(CPU_SUB2, 0x00BB, "sound", a_sound_work, 0, 0),
+    R(CPU_SUB, 0x0038, "sub IRQ", a_sub_irq, 0, 1),
+    R(CPU_SUB, 0x05BF, "sprite banks", a_sub_sprites, 0, 0),
+    R(CPU_SUB, 0x08D3, "motion", a_sub_motion, 0, 0),
+    R(CPU_SUB, 0x06F5, "shots", a_sub_shots, 0, 0),
+    R(CPU_SUB, 0x05EE, "ship hits", a_sub_ship, 0, 0),
+    R(CPU_SUB, 0x0ECA, "debug switch", a_sub_debug, 0, 0),
 };
 #define ROUTINES ((int)(sizeof routines / sizeof routines[0]))
+
+/* the handshakes: an address a CPU waits on for another to change it */
+static const struct { int cpu; uint16_t addr; } syncs[] = { { CPU_SUB, 0x92D6 } };
+#define SYNCS ((int)(sizeof syncs / sizeof syncs[0]))
+
+static int sync_index(int c, uint16_t a)
+{
+    for (int i = 0; i < SYNCS; i++)
+        if (syncs[i].cpu == c && syncs[i].addr == a) return i;
+    return -1;
+}
 
 /* ---- the board and the model ------------------------------------------------- */
 
 static RomSet rom;
 static Board board;
 static uint8_t data[GAME_DATA_SIZE];
+static uint8_t data_read[GAME_DATA_SIZE]; /* the ROM bytes the C routines read */
 static uint8_t wsg[0x20];       /* the WSG's registers as written so far */
 
 typedef struct {
@@ -67,12 +95,15 @@ typedef struct {
     uint8_t written[0x10000];   /* the CPU wrote the address (1), and its value */
     uint8_t value[0x10000];
     int interrupted, raced;
+    int sync_seen[SYNCS];       /* a handshake read, and its last value */
+    uint8_t sync_value[SYNCS];
     uint8_t snapshot[0x10000]; /* the memory at entry, by address */
 } Check;
 
 #define DEPTH 6
 static Check checks[3][DEPTH]; /* each CPU's checks under way, outermost first */
 static int depth[3];
+static int verbose; /* every difference of the first failures (TEST_SIM_VERBOSE) */
 
 static uint8_t board_value(uint16_t a)
 {
@@ -120,6 +151,7 @@ static void load_model(Game *g)
     g->dswa = board.dswa;
     g->dswb = board.dswb;
     g->data = data;
+    g->data_read = data_read;
 }
 
 static Regs cpu_regs(const Z80 *z)
@@ -142,6 +174,7 @@ static void begin(int c, Routine *r)
     for (int i = 0; i < naddrs; i++) k->snapshot[addrs[i]] = board_value(addrs[i]);
     for (int i = 0; i < naddrs; i++) k->written[addrs[i]] = 0;
     k->interrupted = k->raced = 0;
+    memset(k->sync_seen, 0, sizeof k->sync_seen);
 }
 
 static void finish(int c)
@@ -158,6 +191,8 @@ static void finish(int c)
         return;
     }
     Regs regs = k->regs;
+    for (int i = 0; i < SYNCS; i++)
+        if (k->sync_seen[i]) game_wr(&k->model, syncs[i].addr, k->sync_value[i]);
     r->fn(&k->model, &regs);
     if (k->model.unported) {
         r->unported++;
@@ -165,17 +200,24 @@ static void finish(int c)
     }
     r->checked++;
     int bad = 0;
+    if (k->model.stalled) {
+        if (r->failed < 5)
+            fprintf(stderr, "%s ($%04X) at frame %lld: waits on $%04X\n", r->name, r->addr, (long long)board.frame,
+                    k->model.stalled);
+        bad++;
+    }
     for (int i = 0; i < naddrs; i++) {
         uint32_t a = addrs[i];
         if (a < k->sp && a >= (uint32_t)(k->sp - 0x40)) continue; /* the CPU's stack */
+        if (!k->written[a] && sync_index(c, (uint16_t)a) >= 0) continue; /* another CPU's handshake */
         uint8_t want = k->written[a] ? k->value[a] : k->snapshot[a];
         uint8_t got = model_value(&k->model, (uint16_t)a);
         if (a >= 0x6800 && a <= 0x681F) want &= 15;
         if ((a >= 0x6820 && a <= 0x6827) || (a >= 0xA000 && a <= 0xA007)) want &= 1;
         if (got != want) {
-            if (!bad && r->failed < 5)
-                fprintf(stderr, "%s ($%04X) at frame %lld: $%04X is %02X, the ROM's %02X\n", r->name, r->addr,
-                        (long long)board.frame, (unsigned)a, got, want);
+            if ((!bad || verbose) && r->failed < 5)
+                fprintf(stderr, "%s ($%04X) at frame %lld: $%04X is %02X, the ROM's %02X (was %02X)\n", r->name,
+                        r->addr, (long long)board.frame, (unsigned)a, got, want, k->snapshot[a]);
             bad++;
         }
     }
@@ -241,6 +283,14 @@ static void write_hook(Board *b, int c, uint16_t a, uint8_t v)
 static void read_hook(Board *b, int c, uint16_t a, uint8_t v)
 {
     if (c >= CPU_51XX || !compared(a) || (a >= 0x6800 && a <= 0x6807)) return; /* the switches */
+    int s = sync_index(c, a);
+    if (s >= 0) {
+        for (int i = 0; i < depth[c]; i++) {
+            checks[c][i].sync_seen[s] = 1;
+            checks[c][i].sync_value[s] = v;
+        }
+        return;
+    }
     for (int i = 0; i < depth[c]; i++) {
         Check *k = &checks[c][i];
         if (!k->written[a] && v != k->snapshot[a]) k->raced = 1;
@@ -304,6 +354,7 @@ int main(int argc, char **argv)
     memcpy(data, rom.main, ROM_MAIN_SIZE);
     memcpy(data + GAME_SUB, rom.sub, ROM_SUB_SIZE);
     memcpy(data + GAME_SUB2, rom.sub2, ROM_SUB2_SIZE);
+    verbose = getenv("TEST_SIM_VERBOSE") != NULL;
     script();
     list_addrs();
     board_init(&board, &rom);
@@ -318,7 +369,24 @@ int main(int argc, char **argv)
                 board.in1 = steps[i].in1;
             }
     }
+    /* the ROMs' bytes the routines read, as ranges (for the extractor's tables) */
+    if (getenv("TEST_SIM_DATA"))
+        for (unsigned a = 0; a < GAME_DATA_SIZE; a++)
+            if (data_read[a] && (!a || !data_read[a - 1])) {
+                unsigned e = a;
+                while (e + 1 < GAME_DATA_SIZE && data_read[e + 1]) e++;
+                printf("read %s $%04X-$%04X\n", a < GAME_SUB ? "main" : a < GAME_SUB2 ? "sub" : "sub2",
+                       a < GAME_SUB ? a : a < GAME_SUB2 ? a - GAME_SUB : a - GAME_SUB2,
+                       e < GAME_SUB ? e : e < GAME_SUB2 ? e - GAME_SUB : e - GAME_SUB2);
+            }
     int failed = 0;
+    /* the game reads them from tables.txt: none outside it */
+    for (unsigned a = 0; a < GAME_DATA_SIZE; a++)
+        if (data_read[a] && !extract_is_table(a)) {
+            fprintf(stderr, "the routines read $%04X (data), not among the extracted tables\n", a);
+            failed = 1;
+            break;
+        }
     for (int i = 0; i < ROUTINES; i++) {
         Routine *r = &routines[i];
         printf("%-24s $%04X (%s): %ld checked, %ld failed, %ld interrupted, %ld raced, %ld unported\n", r->name, r->addr,

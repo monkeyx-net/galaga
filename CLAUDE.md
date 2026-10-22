@@ -102,7 +102,8 @@ them.
 - `sim/` (C0-C3, under way) - the game in C, each routine mirroring the
   ROM's arithmetic and order of stores, against the same addresses:
   `game.c` (the board's memory as the ROMs lay it out, the ROMs' tables),
-  `sound.c` (sub2: the sound driver)
+  `sound.c` (sub2: the sound driver), `sub.c` (sub: the motion, the
+  hits), `cpu.h` (registers and flags for line-by-line ports)
 - `tests/` - C tests, MAME probes (`tests/mame/`)
 - `packaging/` - release layout script, PortMaster launcher and metadata
 - `web/` - page shell for the Emscripten build

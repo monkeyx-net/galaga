@@ -50,6 +50,7 @@ add_library(galaga_core STATIC
   src/emu/noise54.c
   src/sim/game.c
   src/sim/sound.c
+  src/sim/sub.c
 )
 target_include_directories(galaga_core PUBLIC src)
 target_link_libraries(galaga_core PUBLIC m)

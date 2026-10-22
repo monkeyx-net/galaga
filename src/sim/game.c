@@ -53,3 +53,10 @@ void game_unported(Game *g, uint16_t addr)
 {
     if (!g->unported) g->unported = addr;
 }
+
+int game_wait(Game *g, uint16_t addr, uint8_t value)
+{
+    if (game_rd(g, addr) != value) return 0;
+    if (!g->stalled) g->stalled = addr;
+    return 1;
+}

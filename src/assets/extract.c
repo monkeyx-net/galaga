@@ -20,6 +20,9 @@ static const struct {
     unsigned first, last;
     const char *what;
 } tables[] = {
+    { EXTRACT_SUB_BASE + 0x001D, EXTRACT_SUB_BASE + 0x0033, "sub: motion scripts" },
+    { EXTRACT_SUB_BASE + 0x003B, EXTRACT_SUB_BASE + 0x0512,
+      "sub: the IRQ's tasks, motion scripts, the formation's offsets by sprite" },
     { EXTRACT_SUB2_BASE + 0x06DA, EXTRACT_SUB2_BASE + 0x0F5A,
       "sub2: the sound driver's pitches, glides, sounds, tracks, tempos and notes" },
 };

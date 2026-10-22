@@ -43,6 +43,7 @@ typedef struct Game {
     uint8_t in0, in1, dswa, dswb; /* the switches (active low) */
     const uint8_t *data;     /* GAME_DATA_SIZE bytes: the ROMs' tables */
     uint16_t unported;       /* the ROM address the C game last reached unported, or 0 */
+    uint16_t stalled;        /* the address of a handshake a routine found not yet given, or 0 */
     uint8_t *data_read;      /* optional, for tools: a flag per data byte the game reads */
     /* optional, for tests: called before each write */
     void (*on_write)(void *user, uint16_t addr, uint8_t value);
@@ -67,6 +68,11 @@ uint8_t game_data(const Game *g, unsigned addr);
 /* Shorthands for the routines (g is the Game in scope). */
 #define RD(a) game_rd(g, (uint16_t)(a))
 #define WR(a, v) game_wr(g, (uint16_t)(a), (uint8_t)(v))
+
+/* A CPU's wait while `addr` holds `value`, until another CPU changes it
+   (a handshake). The C game runs the other CPU's part first, so the wait
+   is over: 1 (and g->stalled set) if it is not. */
+int game_wait(Game *g, uint16_t addr, uint8_t value);
 
 /* The C game reached ROM code not yet ported: remember where (the caller
    must leave the state unspecified). */
