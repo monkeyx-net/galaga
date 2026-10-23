@@ -1,9 +1,11 @@
 /*
  * Galaga native build: SDL setup and the fixed 60 Hz loop. See GALAGA_PORT_PLAN.md.
- * The ROM's own code runs on the emulated board (src/emu/), a frame per
- * tick, its sound streamed, when the set and its device ROMs are found; else,
- * or with --test-card, the test card (ROM status, an input tester and the
- * graphics presets). The game in C follows (plan section 3).
+ * The game in C (src/sim/) runs a frame per tick from the assets extracted
+ * from the player's set (extracted on the first run when the set is found),
+ * its sound streamed; with --emulate the ROM's own code runs on the
+ * emulated board instead (src/emu/; it needs the device ROMs too). Without
+ * either, or with --test-card, the test card (ROM status, an input tester
+ * and the graphics presets).
  *
  *   galaga [--windowed] [--gfx preset] [--rom path] [--test-card] [--emulate]
  *          [--frames N] [--screenshot out.png]
@@ -19,7 +21,8 @@
  * probe writes (src/tests/mame/rom_map_probe.lua).
  * --extract writes the graphics, palette, waveforms, font and previews
  * from the ROM set to an asset folder (default: assets/ next to the
- * program; assets/extract.h), which the game in C will read instead of it.
+ * program, or $GALAGA_ASSETS; assets/extract.h), which the game in C reads
+ * instead of it.
  */
 #include <SDL.h>
 #include <stdio.h>
@@ -36,6 +39,7 @@
 #include "gfx/enhance.h"
 #include "gfx/fb.h"
 #include "gfx/galaga.h"
+#include "sim/sim.h"
 #include "platform/audio.h"
 #include "platform/input.h"
 #include "platform/video.h"
@@ -71,8 +75,11 @@ typedef struct {
     char rom_error[256];
     char assets_path[1024]; /* the extracted assets, or "" */
     RomSet rom;
-    int test_card;          /* the test card, not the board */
+    enum { SHOW_CARD, SHOW_GAME, SHOW_BOARD } show; /* the test card, the C game, the board */
     Board board;
+    Sim sim;
+    uint8_t data[GAME_DATA_SIZE]; /* the ROMs' tables, from the assets */
+    uint8_t waves[256];           /* the WSG's waveforms, from the assets */
     GalagaVideo video;
 } Port;
 
@@ -157,11 +164,17 @@ static void draw_scene(Framebuffer *t)
 
 /* Classic: the arcade frame. HD: drawn at the render scale. FILTER: the arcade
    frame upscaled whole. Glow goes over whichever is shown. */
-/* The board's picture into the arcade framebuffer */
-static void draw_board(Framebuffer *t)
+/* The game's picture (the C game's or the board's) into the arcade framebuffer */
+static void draw_game(Framebuffer *t)
 {
-    Board *b = &g.board;
-    GalagaFrame fr = { b->video, { b->ram[0], b->ram[1], b->ram[2] }, b->vlatch, b->star_origin };
+    GalagaFrame fr;
+    if (g.show == SHOW_BOARD) {
+        Board *b = &g.board;
+        fr = (GalagaFrame){ b->video, { b->ram[0], b->ram[1], b->ram[2] }, b->vlatch, b->star_origin };
+    } else {
+        Game *m = &g.sim.g;
+        fr = (GalagaFrame){ m->video, { m->ram[0], m->ram[1], m->ram[2] }, m->vlatch, g.sim.star_origin };
+    }
     galaga_draw(&g.video, &fr);
     for (int y = 0; y < FB_HEIGHT; y++) {
         uint32_t *row = fb_row(t, y);
@@ -175,8 +188,8 @@ static void draw(int display_scale)
     const Scaler scaler = gs->smooth ? SCALER_SMOOTH : SCALER_CRISP;
     const int s = gfx_render_scale(gs, display_scale);
     shown = &fb;
-    if (!g.test_card) { /* only pixels: HD upscales them like FILTER */
-        draw_board(&fb);
+    if (g.show != SHOW_CARD) { /* only pixels: HD upscales them like FILTER */
+        draw_game(&fb);
         if (g.gfx_notice > 0) {
             char text[80];
             snprintf(text, sizeof text, "GRAPHICS: %s", gfx_describe(&g.gfx));
@@ -199,8 +212,8 @@ static void draw(int display_scale)
     if (gs->glow) enhance_glow(shown);
 }
 
-/* The panel to the board's switches (active low) */
-static void board_inputs(const InputFrame *in)
+/* The panel to the switches (active low) */
+static void panel(const InputFrame *in, uint8_t *in0_out, uint8_t *in1_out)
 {
     uint8_t in0 = 0xFF, in1 = 0xFF;
     if (in->move_x < 0) in0 &= (uint8_t)~IN0_LEFT1;
@@ -209,8 +222,8 @@ static void board_inputs(const InputFrame *in)
     if (in->coin) in1 &= (uint8_t)~IN1_COIN1;
     if (in->start) in1 &= (uint8_t)~IN1_START1;
     if (in->start2) in1 &= (uint8_t)~IN1_START2;
-    g.board.in0 = in0;
-    g.board.in1 = in1;
+    *in0_out = in0;
+    *in1_out = in1;
 }
 
 static void step(const InputFrame *in)
@@ -220,10 +233,15 @@ static void step(const InputFrame *in)
     g.in = *in;
     if (in->coin && !coin_was) g.coins++;
     coin_was = in->coin;
-    if (!g.test_card) {
-        board_inputs(in);
+    if (g.show == SHOW_BOARD) {
+        panel(in, &g.board.in0, &g.board.in1);
         board_run_frame(&g.board);
         audio_stream(g.board.audio, BOARD_AUDIO_SAMPLES, BOARD_AUDIO_SAMPLES * FRAME_HZ); /* paced by the loop */
+    } else if (g.show == SHOW_GAME) {
+        uint8_t in0, in1;
+        panel(in, &in0, &in1);
+        sim_frame(&g.sim, in0, in1);
+        audio_stream(g.sim.audio, SIM_AUDIO_SAMPLES, SIM_AUDIO_SAMPLES * FRAME_HZ);
     }
     if (in->gfx_next || in->gfx_glow || in->gfx_scanlines) {
         if (in->gfx_next) gfx_next_preset(&g.gfx);
@@ -278,22 +296,29 @@ static int dump_rom(const char *path, const char *only)
     return 0;
 }
 
+/* Where --extract writes by default: $GALAGA_ASSETS, else assets/ next to the program */
+static void default_assets(const char *argv0, char *dir, size_t len)
+{
+    if (getenv("GALAGA_ASSETS")) {
+        snprintf(dir, len, "%s", getenv("GALAGA_ASSETS"));
+        return;
+    }
+    snprintf(dir, len, "%s", argv0);
+    char *slash = strrchr(dir, '/');
+#ifdef _WIN32
+    char *bslash = strrchr(dir, '\\');
+    if (bslash > slash) slash = bslash;
+#endif
+    if (slash) snprintf(slash, len - (size_t)(slash - dir), "/assets");
+    else snprintf(dir, len, "assets");
+}
+
 static int extract(const char *argv0, const char *rom_path, const char *out_dir)
 {
     static RomSet rom;
     char err[512], dir[1024];
     if (out_dir) snprintf(dir, sizeof dir, "%s", out_dir);
-    else if (getenv("GALAGA_ASSETS")) snprintf(dir, sizeof dir, "%s", getenv("GALAGA_ASSETS"));
-    else {
-        snprintf(dir, sizeof dir, "%s", argv0);
-        char *slash = strrchr(dir, '/');
-#ifdef _WIN32
-        char *bslash = strrchr(dir, '\\');
-        if (bslash > slash) slash = bslash;
-#endif
-        if (slash) snprintf(slash, sizeof dir - (size_t)(slash - dir), "/assets");
-        else snprintf(dir, sizeof dir, "assets");
-    }
+    else default_assets(argv0, dir, sizeof dir);
     if (rom_load(&rom, rom_path, err, sizeof err) || extract_all(&rom, dir, err, sizeof err)) {
         fprintf(stderr, "galaga: %s\n", err);
         return 1;
@@ -406,18 +431,34 @@ int main(int argc, char **argv)
     if (g.rom_path[0] && rom_load(&g.rom, g.rom_path, g.rom_error, sizeof g.rom_error))
         fprintf(stderr, "galaga: %s\n", g.rom_error);
     if (assets_find(argv[0], "manifest.txt", g.assets_path, sizeof g.assets_path)) g.assets_path[0] = '\0';
-    g.test_card = 1;
-    if (!want_card && g.rom.loaded) {
-        if (g.rom.has_51xx && g.rom.has_54xx) {
-            g.test_card = 0;
-            galaga_video_init(&g.video, &g.rom);
-            board_init(&g.board, &g.rom);
-        } else {
+    if (!g.assets_path[0] && g.rom.loaded && !want_card && !want_board) { /* the first run: extract */
+        char err[512];
+        default_assets(argv[0], g.assets_path, sizeof g.assets_path);
+        if (extract_all(&g.rom, g.assets_path, err, sizeof err)) {
+            fprintf(stderr, "galaga: %s\n", err);
+            g.assets_path[0] = '\0';
+        }
+    }
+    g.show = SHOW_CARD;
+    if (want_board && !want_card) {
+        if (!g.rom.loaded) fprintf(stderr, "galaga: --emulate needs the ROM set\n");
+        else if (!g.rom.has_51xx || !g.rom.has_54xx)
             fprintf(stderr, "galaga: the emulated board needs the device ROMs: namco51.zip and namco54.zip next to %s\n",
                     g.rom_path);
+        else {
+            g.show = SHOW_BOARD;
+            galaga_video_init(&g.video, &g.rom);
+            board_init(&g.board, &g.rom);
         }
-    } else if (want_board && !g.rom.loaded) {
-        fprintf(stderr, "galaga: --emulate needs the ROM set\n");
+    } else if (!want_card && g.assets_path[0]) {
+        if (extract_load_tables(g.assets_path, g.data, sizeof g.data) || extract_load_waves(g.assets_path, g.waves) ||
+            galaga_video_load(&g.video, g.assets_path)) {
+            fprintf(stderr, "galaga: the assets in %s are incomplete: extract them again (--extract)\n", g.assets_path);
+        } else {
+            g.show = SHOW_GAME;
+            sim_init(&g.sim, g.data, DSWA_DEFAULT, DSWB_DEFAULT);
+            sim_sound(&g.sim, g.waves);
+        }
     }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_EVENTS) != 0) {

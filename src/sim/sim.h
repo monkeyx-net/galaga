@@ -14,9 +14,13 @@
 #ifndef GALAGA_SIM_H
 #define GALAGA_SIM_H
 
+#include "emu/noise54.h"
+#include "emu/wsg.h"
 #include "sim/cpu.h"
 #include "sim/game.h"
 #include "sim/mcu.h"
+
+#define SIM_AUDIO_SAMPLES 792 /* a frame's at 48 kHz */
 
 enum { SIM_MAIN, SIM_SUB, SIM_SUB2, SIM_Z80S, SIM_51XX = SIM_Z80S, SIM_54XX, SIM_CPUS };
 
@@ -62,10 +66,21 @@ typedef struct Sim {
     int64_t tick_edge;       /* the next tick, as an edge of the 48 kHz clock */
     int64_t half_edges;      /* half the period, in edges */
     int star_origin;         /* the starfield's step (gfx/galaga.c) */
+    /* the sound (sim_sound): the WSG and the 54xx's noise, the last frame's
+       samples in audio, made at its end from the writes' times in it */
+    int sound;
+    Wsg wsg;
+    Noise54 noise;
+    int16_t audio[SIM_AUDIO_SAMPLES];
+    struct { int16_t sample; uint8_t reg, value; } sound_events[512]; /* reg $20: the 54xx's O port */
+    int sound_event_count;
+    SimTime frame_start;     /* the frame's vertical blank */
 } Sim;
 
 /* Power on; `data` the programs' bytes (GAME_DATA_SIZE). */
 void sim_init(Sim *s, const uint8_t *data, uint8_t dswa, uint8_t dswb);
+/* The sound on: the WSG's waveforms (prom-1.1d's 256 samples) */
+void sim_sound(Sim *s, const uint8_t *waves);
 /* One frame, to the next vertical blank, with the control panel (active
    low) as the 51xx reads it in the frame */
 void sim_frame(Sim *s, uint8_t in0, uint8_t in1);

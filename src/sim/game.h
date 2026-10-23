@@ -31,7 +31,8 @@ typedef struct Game {
     uint16_t unported;       /* the ROM address the C game last reached unported, or 0 */
     uint8_t *data_read;      /* optional, for tools: a flag per data byte the game reads */
     /* the scheduler's (sim/sim.c): the writes with an effect beyond the
-       memory (the latches $6820-$6827, the watchdog, the 06xx) after them,
+       memory (the WSG, the latches $6820-$6827, the watchdog, the 06xx)
+       after them,
        the reads of the 06xx ($7000, $7100) */
     void (*bus_write)(void *bus, uint16_t addr, uint8_t value);
     uint8_t (*bus_read)(void *bus, uint16_t addr);

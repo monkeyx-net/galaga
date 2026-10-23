@@ -576,10 +576,10 @@ static void timeslice(Board *b)
         if (at_lt(expire, target)) target = expire;
         b->target = target;
         for (int c = 0; c < BOARD_CPUS; c++) {
+            if (b->held[c]) continue;
             if (b->target.sec < b->local[c].sec) continue;
             int64_t delta = at_diff(b->target, b->local[c]);
             if (delta < apc[c]) continue;
-            if (b->held[c]) continue;
             /* MAME divides by the cycle's attoseconds cut to 32 bits, which
                rounds up where the time is a whole number of cycles less a
                few attoseconds */

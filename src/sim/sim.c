@@ -171,6 +171,52 @@ static uint8_t data_read(Sim *s)
     return v;
 }
 
+/* ---- the sound ---------------------------------------------------------------------------- */
+
+#define SOUND_O54 0x20
+
+/* a write to the WSG or the 54xx's O port, at its sample in the frame */
+static void sound_event(Sim *s, Atime at, int reg, uint8_t value)
+{
+    if (!s->sound || s->sound_event_count == (int)(sizeof s->sound_events / sizeof s->sound_events[0])) return;
+    int64_t n = at_diff(at, s->frame_start) / (64 * Z80_APC);
+    s->sound_events[s->sound_event_count].sample =
+        (int16_t)(n < 0 ? 0 : n >= SIM_AUDIO_SAMPLES ? SIM_AUDIO_SAMPLES - 1 : n);
+    s->sound_events[s->sound_event_count].reg = (uint8_t)reg;
+    s->sound_events[s->sound_event_count].value = value;
+    s->sound_event_count++;
+}
+
+/* the frame's sound, from the writes' times in it */
+static void make_sound(Sim *s)
+{
+    if (!s->sound) return;
+    static int32_t mix[SIM_AUDIO_SAMPLES];
+    memset(mix, 0, sizeof mix);
+    int done = 0;
+    for (int i = 0; i <= s->sound_event_count; i++) {
+        int at = i < s->sound_event_count ? s->sound_events[i].sample : SIM_AUDIO_SAMPLES;
+        if (at > done) {
+            wsg_render(&s->wsg, mix + done, at - done);
+            noise54_render(&s->noise, mix + done, at - done);
+            done = at;
+        }
+        if (i == s->sound_event_count) break;
+        if (s->sound_events[i].reg == SOUND_O54) noise54_write(&s->noise, s->sound_events[i].value);
+        else wsg_write(&s->wsg, s->sound_events[i].reg, s->sound_events[i].value);
+    }
+    s->sound_event_count = 0;
+    for (int i = 0; i < SIM_AUDIO_SAMPLES; i++)
+        s->audio[i] = (int16_t)(mix[i] > 32767 ? 32767 : mix[i] < -32768 ? -32768 : mix[i]);
+}
+
+/* the 54xx's O port, at its OUTO's start (one cycle) */
+static void m54_o(void *ctx, uint8_t v)
+{
+    Sim *s = ctx;
+    sound_event(s, at_mul_add(s->local[SIM_54XX], s->mcu[1].t - 1 - s->done[SIM_54XX], MCU_APC), SOUND_O54, v);
+}
+
 /* the chips' ports: the 51xx's K the mode and the byte's low bits, its R
    the control panel (IN0 low and high, IN1 low and high); the 54xx's K the
    byte's high nibble, its R0 the low */
@@ -247,7 +293,9 @@ static void reset_lines(Sim *s)
 static void bus_write(void *ctx, uint16_t a, uint8_t v)
 {
     Sim *s = ctx;
-    if (a >= 0x6820 && a <= 0x6827) {
+    if (a <= 0x681F) {
+        sound_event(s, now(s), a & 0x1F, v & 15);
+    } else if (a >= 0x6820 && a <= 0x6827) {
         int n = a & 7;
         if (n == 0 && !(v & 1)) {
             s->irq_main = 0;
@@ -303,6 +351,8 @@ static void fire(Sim *s, const SimTimer *t)
 {
     switch (t->what) {
     case E_VBLANK:
+        make_sound(s);
+        s->frame_start = t->at;
         s->frame_done = 1;
         s->star_origin = galaga_star_advance(s->star_origin, s->g.vlatch);
         if (++s->watchdog >= WATCHDOG_FRAMES) watchdog_reset(s);
@@ -516,6 +566,7 @@ void sim_init(Sim *s, const uint8_t *data, uint8_t dswa, uint8_t dswb)
     s->mcu[0].read_r = m51_r;
     s->mcu[1].read_k = m54_k;
     s->mcu[1].read_r = m54_r;
+    s->mcu[1].write_o = m54_o;
     s->running = -1;
     s->star_origin = STAR_ORIGIN_POWER_ON;
     /* the screen starts at the vertical blank */
@@ -523,6 +574,13 @@ void sim_init(Sim *s, const uint8_t *data, uint8_t dswa, uint8_t dswb)
     timer_set(s, T_LINE0, (Atime){ 0, 40 * LINE_AS }, 0, E_LINE0, 0);
     timer_set(s, T_SUB2_NMI, (Atime){ 0, 104 * LINE_AS }, 0, E_SUB2_NMI, 64);
     timer_set(s, T_SOUND, (Atime){ 0, SOUND_TIMER_AS }, SOUND_TIMER_AS, E_SOUND, 0);
+}
+
+void sim_sound(Sim *s, const uint8_t *waves)
+{
+    wsg_init(&s->wsg, waves);
+    noise54_reset(&s->noise);
+    s->sound = 1;
 }
 
 void sim_frame(Sim *s, uint8_t in0, uint8_t in1)

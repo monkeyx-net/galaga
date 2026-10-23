@@ -21,7 +21,7 @@ but ask first.
 
 - **The game is being rewritten in C** (plan decision 6): game logic from
   the ROM's behaviour, checked frame by frame against the emulated board
-  (`src/emu/`). Until it reaches parity the emulated board runs the game.
+  (`src/emu/`). The C game is the default; `--emulate` runs the board.
   MAME is the reference for the emulation: changes to `emu/` must keep the
   `mame` tests passing. Write all emulation from the hardware's behaviour,
   not from MAME's source.
@@ -50,7 +50,7 @@ cmake -S . -B build && cmake --build build -j     # build
 ctest --test-dir build                            # all tests
 ctest --test-dir build -L rom                     # tests needing the ROM set (roms/galaga.zip)
 ctest --test-dir build -L mame                    # tests needing MAME + the ROM sets (galaga, namco51, namco54)
-build/galaga --windowed                           # play (dev builds find build/assets, roms/galaga.zip)
+build/galaga --windowed                           # play the game in C (dev builds find build/assets, roms/galaga.zip)
 build/galaga --windowed --emulate                 # the ROM's own code on the emulated board
 build/galaga --windowed --test-card               # the test card (ROM status, input tester)
 build/galaga --check-rom roms/galaga.zip          # verify a ROM set (and the device ROMs next to it)
@@ -63,16 +63,15 @@ emcmake cmake -S . -B build-web && cmake --build build-web --target serve   # we
 ```
 
 Release builds: `-DGALAGA_DEV_ASSETS=OFF` (no source-tree fallbacks).
-Until the game is in C, the program runs the ROM on the emulated board
-(with its sound) when it finds the set and the device ROMs, else the test
-card. Commands for phases not yet done (see the plan's table) arrive with
-them.
+The program runs the game in C from the extracted assets (extracting them
+on the first run when it finds the set), else the test card. Commands for
+phases not yet done (see the plan's table) arrive with them.
 
 ## Layout (`src/`)
 
-- `main.c` - SDL setup, the fixed 60 Hz loop running a board frame per
-  tick (`--emulate`; the C game later), the graphics pipeline, the test
-  card (`--test-card`, or no ROM set or device ROMs), `--frames`,
+- `main.c` - SDL setup, the fixed 60 Hz loop running a frame of the C game
+  per tick (or of the board, `--emulate`), the graphics pipeline, the test
+  card (`--test-card`, or no ROM set or assets), `--frames`,
   `--screenshot`, `--rom`, `--check-rom`, `--dump-rom`; later the DIP
   switches (`galaga.cfg`), the high scores (`galaga.hiscore`)
 - `platform/` - the only code that includes SDL: `video.c` (224x288

@@ -4,15 +4,15 @@ A C11 / SDL2 port of the 1981 Namco arcade game for Linux handhelds
 (PortMaster: ArkOS, ROCKNIX, muOS, Knulli), desktops (Linux, Windows, macOS) and the
 web, checked against the original ROM running in MAME.
 
-**Status:** skeleton. The program loads and checks your ROM set and shows
-a test card. Next: an emulated Galaga board (three Z80s, the Namco
-customs, video, sound) checked against MAME, then the game rewritten in C
-and checked frame by frame against it. See
+**Status:** the game runs in C, equal frame for frame (pictures and sound)
+to an emulated Galaga board that is itself checked against MAME. Next: the
+DIP switch menu, high-score saving, cocktail flip and release. See
 [GALAGA_PORT_PLAN.md](GALAGA_PORT_PLAN.md).
 
 You need your own MAME `galaga` ROM set (`galaga.zip`); none is included.
-The emulated board and the MAME tests also need the device ROMs
-`namco51.zip` and `namco54.zip` next to it.
+The first run extracts what the game needs from it to `assets/` next to
+the program. The emulated board (`--emulate`) and the MAME tests also need
+the device ROMs `namco51.zip` and `namco54.zip` next to it.
 
 Converted by monkeyx.
 

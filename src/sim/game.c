@@ -24,7 +24,7 @@ void game_wr(Game *g, uint16_t a, uint8_t v)
     else if (a >= 0x9000 && a <= 0x93FF) g->ram[1][a & 0x3FF] = v;
     else if (a >= 0x9800 && a <= 0x9BFF) g->ram[2][a & 0x3FF] = v;
     else if (a >= 0xA000 && a <= 0xA007) g->vlatch[a & 7] = v & 1;
-    if (g->bus_write && ((a >= 0x6820 && a <= 0x6837) || (a >= 0x7000 && a <= 0x7100))) g->bus_write(g->bus, a, v);
+    if (g->bus_write && ((a >= 0x6800 && a <= 0x6837) || (a >= 0x7000 && a <= 0x7100))) g->bus_write(g->bus, a, v);
 }
 
 uint8_t game_data(const Game *g, unsigned addr)

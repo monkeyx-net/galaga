@@ -3,10 +3,11 @@
  *   test_frame <galaga.zip|folder> [frames]
  * Powers both on and runs them with the same inputs (the tests' player,
  * from the board's memory), comparing at the end of each frame all the
- * memory, the latches and the WSG's registers. Reports the first frame
- * that differs and stops there. A game's end ends the run; with
- * TEST_FRAME_ON set the player goes on to the next game (and the board's
- * 51xx can go astray at a game's end, plan section 2: the C game's too).
+ * memory, the latches, the WSG's registers and the frame's sound. Reports
+ * the first frame that differs and stops there. A game's end ends the run;
+ * with TEST_FRAME_ON set the player goes on to the next game (and the
+ * board's 51xx can go astray at a game's end, plan section 2: the C
+ * game's too).
  * TEST_FRAME_TRACE=<frame>[:<from>-<to>] prints, from that frame on, both
  * sides' writes to the latches, the 06xx and the given addresses (hex), at
  * their times (seconds since power-on).
@@ -117,6 +118,7 @@ int main(int argc, char **argv)
     board_init(&board, &rom);
     board.write_hook = write_hook;
     sim_init(&sim, data, board.dswa, board.dswb);
+    sim_sound(&sim, rom.namco);
     const char *tr = getenv("TEST_FRAME_TRACE");
     if (tr) {
         trace_from = atol(tr);
@@ -139,6 +141,12 @@ int main(int argc, char **argv)
             return 1;
         }
         long d = compare();
+        for (int i = 0; i < SIM_AUDIO_SAMPLES; i++)
+            if (sim.audio[i] != board.audio[i]) {
+                printf("  sample %d: the C game's %d, the board's %d\n", i, sim.audio[i], board.audio[i]);
+                d++;
+                break;
+            }
         if (d) {
             printf("frame %lld: %ld bytes differ\n", (long long)board.frame, d);
             for (int c = 0; c < 3; c++)

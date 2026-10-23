@@ -327,7 +327,7 @@ To confirm by probe (written up here as confirmed):
 | E1 | Three Z80s, the MB88xx core (51xx, 54xx), board (shared RAM, latches, 06xx, interrupts, watchdog), video (tiles, sprites, lookups), stars; the game plays via `--emulate` (silent) | `z80`, `mb88`; `mame_emu`: the CPUs cycle for cycle over traced frames; RAM and pictures equal at captured frames (`mame_capture`) | done 2026-10-22 (the 51xx's read-mode select timing aside) |
 | E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | done 2026-10-22 (tables as the C phases need them) |
-| C0-C3 | RE notes; the C game (the five CPUs' programs, the board's scheduler), then the default | `mcu`, `frame`; the C game plays from power-on through game over | under way: the C game equals the board every frame from power-on through a game; next its sound and pictures, the default |
+| C0-C3 | RE notes; the C game (the five CPUs' programs, the board's scheduler), then the default | `mcu`, `frame`; the C game plays from power-on through game over | done 2026-10-23: the default, equal to the board every frame (memory, latches, sound) from power-on through a game |
 | E3/E4 | Polish (cocktail flip, devices, web), the DIP switches' menu, high-score saving, release | device checklist; published | to do |
 
 Each phase gets its own commit. Nothing is pushed or published without
@@ -372,7 +372,8 @@ asking.
   RAM and ports equal at every step
 - `frame` - label `rom`: the C game and the board from power-on with the
   tests' player (an attract cycle, then a game to its end): all memory,
-  the latches and the WSG's registers equal at every frame
+  the latches, the WSG's registers and the frame's sound equal at every
+  frame
 
 ## 5. For the sibling ports
 
