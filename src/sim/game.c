@@ -1,14 +1,12 @@
 #include "sim/game.h"
 
-#include "sim/io.h"
-
 uint8_t game_rd(const Game *g, uint16_t a)
 {
     if (a >= 0x6800 && a <= 0x6807) {
         int n = a & 7;
         return (uint8_t)((g->dswb >> n & 1) | (g->dswa >> n & 1) << 1);
     }
-    if (a == 0x7100) return g->io ? g->io->ctrl : 0x10;
+    if (a >= 0x7000 && a <= 0x7100 && g->bus_read) return g->bus_read(g->bus, a);
     if (a >= 0x8000 && a <= 0x87FF) return g->video[a & 0x7FF];
     if (a >= 0x8800 && a <= 0x8BFF) return g->ram[0][a & 0x3FF];
     if (a >= 0x9000 && a <= 0x93FF) return g->ram[1][a & 0x3FF];
@@ -26,24 +24,7 @@ void game_wr(Game *g, uint16_t a, uint8_t v)
     else if (a >= 0x9000 && a <= 0x93FF) g->ram[1][a & 0x3FF] = v;
     else if (a >= 0x9800 && a <= 0x9BFF) g->ram[2][a & 0x3FF] = v;
     else if (a >= 0xA000 && a <= 0xA007) g->vlatch[a & 7] = v & 1;
-}
-
-uint16_t game_rd16(const Game *g, uint16_t a) { return (uint16_t)(game_rd(g, a) | game_rd(g, (uint16_t)(a + 1)) << 8); }
-
-void game_wr16(Game *g, uint16_t a, uint16_t v)
-{
-    game_wr(g, a, (uint8_t)v);
-    game_wr(g, (uint16_t)(a + 1), (uint8_t)(v >> 8));
-}
-
-void game_fill(Game *g, uint16_t a, uint8_t v, int n)
-{
-    while (n--) game_wr(g, a++, v);
-}
-
-void game_copy(Game *g, uint16_t dst, uint16_t src, int n)
-{
-    while (n--) game_wr(g, dst++, game_rd(g, src++));
+    if (g->bus_write && ((a >= 0x6820 && a <= 0x6837) || (a >= 0x7000 && a <= 0x7100))) g->bus_write(g->bus, a, v);
 }
 
 uint8_t game_data(const Game *g, unsigned addr)
@@ -56,26 +37,3 @@ void game_unported(Game *g, uint16_t addr)
 {
     if (!g->unported) g->unported = addr;
 }
-
-int game_wait(Game *g, uint16_t addr, uint8_t value)
-{
-    if (game_rd(g, addr) != value) return 0;
-    if (!g->stalled) g->stalled = addr;
-    return 1;
-}
-
-int game_wait_for(Game *g, uint16_t addr, uint8_t value)
-{
-    if (game_rd(g, addr) == value) return 0;
-    if (!g->stalled) g->stalled = addr;
-    return 1;
-}
-
-uint8_t game_r(Game *g)
-{
-    if (g->r_hook) return g->r_hook(g->user);
-    g->r = (uint8_t)((g->r & 0x80) | ((g->r + 0x35) & 0x7F));
-    return g->r;
-}
-
-uint8_t game_rd_main(const Game *g, uint16_t addr) { return addr < 0x4000 ? game_data(g, addr) : game_rd(g, addr); }

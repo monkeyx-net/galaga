@@ -48,17 +48,21 @@ the WSG and the 54xx's noise) is new.
    bilinear, pillarboxed); the scanlines run down the screen.
 6. **The game in C.** The game logic is rewritten in C (`src/sim/`), from
    the ROM's behaviour (traces, probes, the disassembly MAME writes to
-   `build/re`, never committed), routine by routine, each mirroring the
-   ROM's arithmetic. The emulated board (`src/emu/`, checked against MAME
-   by `mame_emu`) stays as the reference the C game is compared with.
+   `build/re`, never committed): each CPU's program whole, instruction by
+   instruction, mirroring the ROM's arithmetic and timing, so that the
+   three Z80s and the two MCUs, scheduled as the board schedules them, do
+   what the board does cycle for cycle. The emulated board (`src/emu/`,
+   checked against MAME by `mame_emu`) stays as the reference the C game
+   is compared with.
 7. **High-score saving** (a port feature: the arcade forgets its table at
    power-off): the top five with initials, `galaga.hiscore` in the save
    folder.
 8. **The device ROMs** (`51xx.bin` from `namco51.zip`, `54xx.bin` from
    `namco54.zip`, the MB8843 / MB8844 programs of the 51xx and 54xx) are
    loaded only when present: the emulated board (`--emulate`) runs them
-   on an MB88xx core, and the MAME tests need them. The C game does not:
-   players need only `galaga.zip`. The loader finds them in `galaga.zip`,
+   on an MB88xx core, and the MAME tests need them. The C game does not
+   (their programs are ported, section 2.3): players need only
+   `galaga.zip`. The loader finds them in `galaga.zip`,
    their own zips next to it, or a folder, by CRC.
 9. **The WSG's waveforms are extracted** (`prom-1.1d`, 8 waveforms of 32
    4-bit samples): unlike Galaxian's discrete circuit, Galaga's tones are
@@ -186,9 +190,14 @@ instruction for instruction (each point found where a trace differed):
   writer's time, once the others have caught up; the writer's slice ends
   there. Timer callbacks see their own time as now.
 - A Z80 stops between machine cycles when its cycles run out: an access
-  whose machine cycle would start later waits for its next slice, after
-  the other CPUs (the board re-runs the instruction then, replaying the
-  accesses already made).
+  (a fetch after an instruction's first byte, an operand, a data access,
+  an interrupt's pushes) whose machine cycle would start later waits for
+  its next slice, after the other CPUs (the board re-runs the instruction
+  then, replaying the accesses already made).
+- The C game (`sim.c`) does all of this as the board does, the MCUs
+  included: their whole instructions, ending slices short, shape when the
+  Z80s' slices end, and so which of two CPUs racing on a byte sees it
+  first.
 - The 50 Hz sound update (MAME's) and screen line 0 are timers too: they
   cut slices.
 
@@ -252,17 +261,22 @@ MAME is not quiet, 554 of 555 within 3 dB of its level (the test asks 90%).
 
 ### 2.3 The programs (C0-, `src/sim/`)
 
-Read from listings built from the board's executed instructions (a Z80
-disassembler over the PCs `sim`'s run reaches, `TEST_SIM_COVER`, and the
-code reachable from them and the jump tables; `build/re`, never
-committed). Routines whose registers and flags carry from block to block
-are ported line by line on `sim/cpu.h`, first drafted by a translator
-there (`build/re/tools/z80c.py`, never committed), then read and checked;
-the reads of R (main's $1000, random numbers) go through `game_r`, which
-the checker feeds the board's values. Each of the three Z80s has its own ROM at $0000 and its
-own stack: main's at $8B00 then $90A0, sub's $9100, sub2's $9B00.
-- main (`sim/irq.c`, `tasks.c`, `routines.c`: the IRQ and its tasks
-  ported): reset $0000 -> $02C4 (RAM, ROM and video tests from $336C), then
+Read from listings built from the board's executed instructions and the
+code reachable from them and the jump tables (`build/re`, never
+committed). Each program is ported whole, as one resumable C function
+per CPU, every instruction a case of its switch (`sim/main_run.c`,
+`sub_run.c`, `sub2_run.c`): drafted by a translator there
+(`build/re/tools/z80prog.py`, never committed) on `sim/cpu.h`, then read.
+An instruction counts its cycles and fetches (R) as the Z80 does, knows
+the machine cycles of its accesses (where a slice can stop it), and
+sets F whole, bits 3 and 5 too (an interrupt's PUSH AF stores them), with
+WZ and Q where those reach F. CALL, RET, PUSH and POP go through memory.
+The 51xx's and 54xx's MB88 programs are ported the same way
+(`sim/m51_run.c`, `m54_run.c`, `build/re/tools/mb88prog.py`; `sim/mcu.h`),
+their ports wired as the board's. Each of the three Z80s has its own ROM
+at $0000 and its own stack: main's at $8B00 then $90A0, sub's $9100,
+sub2's $9B00.
+- main: reset $0000 -> $02C4 (RAM, ROM and video tests from $336C), then
   the state machine at $02D3 (the attract mode, the game) polling flags
   the tasks set. IRQ (IM 1, $0038 -> $0237): the stars' latches from
   $99BE, the watchdog, then the tasks: $9000-$901F a byte each, each one
@@ -270,7 +284,7 @@ own stack: main's at $8B00 then $90A0, sub's $9100, sub2's $9B00.
   51xx's three bytes into $99B5 (control $71). NMI ($0066): the 06xx's
   byte mover (LDI from the queued buffer, then the next queued transfer:
   $9AB9 sends the 54xx's command from $0092).
-- sub (`sim/sub.c`, the IRQ ported): $0000 -> $057C (its ROM's sum), IRQ
+- sub: $0000 -> $057C (its ROM's sum), IRQ
   ($0038 -> $0513): $92A0 counts frames, then 8 tasks at $9020 through
   the pointers at $003B (a task's byte is its step to the next): the
   sprites' registers copied to their shown bank ($05BF; waits on main's
@@ -281,9 +295,7 @@ own stack: main's at $8B00 then $90A0, sub's $9100, sub2's $9B00.
   ship), the shots ($06F5) and the ship ($05EE) against the sprites, the
   hits ($07C2: points, sounds, the boss's two hits, the captured ship).
   $0ECA (DSWA bit 2 off) reads where nothing answers and restarts the CPU.
-  Its code carries registers and flags from block to block, so it is
-  ported line by line (`sim/cpu.h`: the registers and the flags tested).
-- sub2 (`sim/sound.c`, all ported): $0000 -> $0085: its ROM's sum handed
+- sub2: $0000 -> $0085: its ROM's sum handed
   to main at $9101, then everything in the NMI ($0066, lines 64 and 192):
   the sound driver ($00BB). Sounds are asked for by flags at $9AA0-$9AB6
   (main and sub set them), started ($9AC0-$9AD6), played from headers at
@@ -293,8 +305,7 @@ own stack: main's at $8B00 then $90A0, sub's $9100, sub2's $9B00.
   at $06F4 / $0704 by $9211. $9AB7 stops everything, $9AB8 restarts sub2.
   The WSG's registers are kept at $9A60-$9A72 and copied out each NMI.
 
-- the 51xx (`sim/io.c`, ported from its MB8843 program; `io` checks it
-  against the board's): its loop waits on its timer, which the vertical
+- the 51xx: its loop waits on its timer, which the vertical
   blank clocks, so it runs once a frame, reads the control panel (R0-R3)
   and fills a buffer of four bytes at RAM 2:4-2:B, which each rise of the
   select line in read mode puts out in turn (RAM 0:6 the pointer; main
@@ -316,7 +327,7 @@ To confirm by probe (written up here as confirmed):
 | E1 | Three Z80s, the MB88xx core (51xx, 54xx), board (shared RAM, latches, 06xx, interrupts, watchdog), video (tiles, sprites, lookups), stars; the game plays via `--emulate` (silent) | `z80`, `mb88`; `mame_emu`: the CPUs cycle for cycle over traced frames; RAM and pictures equal at captured frames (`mame_capture`) | done 2026-10-22 (the 51xx's read-mode select timing aside) |
 | E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | done 2026-10-22 (tables as the C phases need them) |
-| C0-C3 | RE notes; the C game piece by piece (the three CPUs' work), then the default | `sim`, `routines`, `frame`; the C game plays from power-on through game over | under way: the state, the checker, sub2's sound driver, sub's IRQ, main's IRQ and tasks |
+| C0-C3 | RE notes; the C game (the five CPUs' programs, the board's scheduler), then the default | `mcu`, `frame`; the C game plays from power-on through game over | under way: the C game equals the board every frame from power-on through a game; next its sound and pictures, the default |
 | E3/E4 | Polish (cocktail flip, devices, web), the DIP switches' menu, high-score saving, release | device checklist; published | to do |
 
 Each phase gets its own commit. Nothing is pushed or published without
@@ -355,19 +366,13 @@ asking.
   "GALAGA", "SCORE", "HIGH SCORE" and "CREDIT" off the title screen the
   emulated board draws, each letter of GALAGA its tile's pixels in its
   colour; no manifest without a ROM set
-- `sim` - label `rom`: a scripted run on the board (30000 frames: the
-  attract mode, coins, a one- and a two-player game). Every ported routine
-  is checked at every call its CPU makes (by CALL, RST or the interrupt
-  for a handler; nested calls too): a model loaded from the board runs
-  the C routine; when the ROM's returns, every address that CPU wrote
-  holds what it last wrote, every other address what it held at entry
-  (bar its stack below the entry SP), and the output registers are the
-  CPU's. Skipped: calls an interrupt broke into, and calls that read
-  something another CPU changed meanwhile (counted)
-- `routines` - label `rom`: ROM routines from random states on the
-  emulated Z80 against the C ones
-- `frame` - label `rom`: the C game alone equals the board every frame
-  through scripted games; it reads only the extracted assets
+- `mcu` - label `rom`: the C 51xx and 54xx programs against
+  `emu/mb88.c` running the device ROMs, an instruction at a time from the
+  same random inputs (K, R, the interrupt, the timer): cycles, registers,
+  RAM and ports equal at every step
+- `frame` - label `rom`: the C game and the board from power-on with the
+  tests' player (an attract cycle, then a game to its end): all memory,
+  the latches and the WSG's registers equal at every frame
 
 ## 5. For the sibling ports
 

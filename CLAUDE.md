@@ -99,16 +99,15 @@ them.
   attosecond time, slices, syncs, Z80s stopping between machine cycles),
   `wsg.c` (the Namco WSG), `noise54.c` (the 54xx's noise through two
   band-passes, modelled from MAME's output; 792 samples a frame at 48 kHz)
-- `sim/` (C0-C3, under way) - the game in C, each routine mirroring the
-  ROM's arithmetic and order of stores, against the same addresses:
-  `game.c` (the board's memory as the ROMs lay it out, the ROMs' tables),
-  `sound.c` (sub2: the sound driver), `sub.c` (sub: the motion, the
-  hits), `tasks.c` / `routines.c` (main's IRQ, its tasks and its
-  subroutines), `fg.c` (main's foreground, resumable) - generated line by
-  line from the ROM's code, counting Z80 cycles, and read; `sim.c` (a frame
-  of the C game), `io.c` (the 06xx's transfers at once; the 51xx's MB8843
-  program ported, its loop once a frame), `cpu.h` (registers and flags
-  for line-by-line ports)
+- `sim/` (C0-C3, under way) - the game in C: `main_run.c`, `sub_run.c`,
+  `sub2_run.c` (each Z80 program whole, every instruction a case of one
+  resumable function, its cycles, its accesses' machine cycles and F
+  exact), `m51_run.c`, `m54_run.c` (the 51xx's and 54xx's MB88 programs
+  the same way), all generated from the ROMs' code and read; `cpu.h`
+  (registers, flags, the stops between machine cycles), `mcu.h` (the MB88
+  state and ports), `game.c` (the board's memory as the ROMs lay it out,
+  the ROMs' tables), `sim.c` (the board's scheduler and devices as
+  `board.c` has them, a frame at a time)
 - `tests/` - C tests, MAME probes (`tests/mame/`)
 - `packaging/` - release layout script, PortMaster launcher and metadata
 - `web/` - page shell for the Emscripten build
@@ -139,11 +138,11 @@ section 4).
   read back (graphics, colours, waveforms, tables) is the ROM set's; the
   font reads the title screen the emulated board draws; no manifest
   without a ROM set
-- `sim` - label `rom`: every ported routine checked at every call its CPU
-  makes in a 30000-frame scripted run, against a model loaded from the
-  board (what that CPU wrote, its output registers; calls an interrupt
-  broke into, or that read another CPU's changes, skipped)
-- `routines`, `frame` - label `rom`, with the C game (see the plan)
+- `mcu` - label `rom`: the C 51xx and 54xx programs step for step against
+  `emu/mb88.c` with the device ROMs, under random inputs
+- `frame` - label `rom`: the C game against the board from power-on, the
+  tests' player in an attract cycle and a game: memory, the latches and
+  the WSG equal at every frame (`TEST_FRAME_TRACE` to debug a difference)
 - `mame_rom_map` - label `mame`: MAME's view of every region equals
   `galaga --dump-rom`
 - `mame_capture` - label `mame`: runs the scripted game in

@@ -1,32 +1,70 @@
 /*
- * Registers and flags for routines ported line by line, where a ROM's code
- * carries values in registers and flags from one block to the next (a
- * register left over from an earlier block feeding a division, a carry
- * feeding a rotate). The flags kept are the ones the programs test or
- * DAA reads: carry, zero, sign, half carry, subtract; each operation sets
- * them as the Z80 does.
+ * A Z80's registers and flags for its program ported line by line
+ * (sim/progs.h), where a ROM's code carries values in registers and flags
+ * from one block to the next (a register left over from an earlier block
+ * feeding a division, a carry feeding a rotate). F is the whole byte, as
+ * an interrupt's PUSH AF puts it in memory: each operation sets it as the
+ * Z80 does (the board's, emu/z80.c), its undocumented bits 3 and 5 too,
+ * which SCF and CCF take from Q (F, when the instruction before set it) and
+ * BIT n,(HL) from the internal WZ, which the instructions that set it set
+ * here too.
+ *
+ * Like the board's Z80 (MAME's), a program stops between machine cycles
+ * when its slice ends inside an instruction: at a fetch after its first
+ * (a prefix's opcode, an operand: cpu_fetch, before it does anything, as
+ * the fetches come first), or at a memory access: an instruction that
+ * would cross its budget keeps its registers at its start (cpu_part); an
+ * access at or past the budget (each instruction's accesses have their
+ * machine cycles' offsets) then stops it there (longjmp to the scheduler),
+ * and the instruction is run again in its next slice, its accesses so far
+ * replayed: the reads with the values they had, the writes not again.
  */
 #ifndef GALAGA_CPU_H
 #define GALAGA_CPU_H
 
+#include <setjmp.h>
+#include <stddef.h>
+#include <string.h>
+
 #include "sim/game.h"
 
-typedef struct {
-    Game *g;
-    uint8_t a, b, c, d, e, h, l;
-    uint8_t cf, zf, sf, hf, nf; /* carry, zero, sign, half carry, subtract */
-    uint8_t pf;                 /* P/V, as the block instructions leave it (BC not 0) */
-    uint8_t iff;                /* interrupts enabled (EI / DI) */
-    uint16_t pc;                /* a resumable routine: where it goes on, */
-    uint8_t resume;             /* and at once (1: an EI let the IRQ in) or at its next frame (0) */
-    uint8_t halted;             /* stopped at a HALT until the next interrupt */
-    int64_t t, budget;          /* the Z80 cycles run, and where a resumable routine stops (the next vertical blank) */
+typedef struct Cpu {
+    /* the registers (cpu_part keeps them, from a to ei_delay) */
+    uint8_t a, f, b, c, d, e, h, l;
     uint16_t ix, iy;
-    uint8_t a2, cf2, zf2, sf2, hf2, nf2; /* AF' */
-    uint8_t b2, c2, d2, e2, h2, l2;      /* BC', DE', HL' */
-    uint16_t sp, stack[32];     /* the stack: PUSH / POP and the return addresses of a resumable routine */
+    uint8_t a2, f2, b2, c2, d2, e2, h2, l2; /* AF', BC', DE', HL' */
+    uint16_t sp;                /* the stack pointer: PUSH and POP go through memory */
+    uint16_t wz;                /* the internal WZ (MEMPTR) */
+    uint8_t r, r7;              /* the refresh register: its count of opcode fetches, and bit 7 as loaded */
+    uint8_t iff, iff2;          /* interrupts enabled (EI / DI; RETN restores from IFF2) */
+    uint8_t ei_delay;           /* an EI with the IRQ up: the next instruction, then the IRQ */
+    int64_t q_t;                /* where the last instruction that set F ended (Q: F if it is the one before) */
+    uint8_t regs_end;
+    /* a program run resumably: */
+    Game *g;
     uint16_t rom;               /* where the CPU's ROM sits in g->data (0, GAME_SUB, GAME_SUB2) */
+    uint16_t pc;                /* where it goes on */
+    uint8_t halted;             /* stopped at a HALT until an interrupt */
+    uint8_t irq_line, nmi;      /* its IRQ line (level), an NMI to take */
+    int64_t t, budget;          /* the Z80 cycles run, and where it stops (between instructions) */
+    int64_t limit;              /* where its accesses stop (the slice's end) */
+    uint16_t stop_pc, stop_sp;  /* it stops when a RET (or JP (HL)) brings it there (the tests) */
+    /* an instruction across its budget (cpu_part): */
+    uint8_t stopped;            /* stopped inside it (at part_pc): to finish before an interrupt */
+    uint8_t in_int;             /* it is an interrupt's acceptance (sim.c): 1 the NMI, 2 the IRQ */
+    uint8_t partial;            /* its accesses checked */
+    uint8_t acc;                /* its accesses so far */
+    uint8_t rep_n, rep_now;     /* accesses made before it stopped (to replay), and in this run */
+    uint8_t rep[8];             /* their reads' values */
+    const uint8_t *offs;        /* its accesses' offsets in cycles */
+    uint16_t part_pc;           /* where it starts */
+    int64_t t_start, t_stop;    /* its start, and where it stopped */
+    int64_t t_access;           /* the machine cycle's start of the write under way (cycles) */
+    jmp_buf *jb;                /* the scheduler's, for the stop */
+    uint8_t saved[64];          /* the registers at its start */
 } Cpu;
+
+_Static_assert(offsetof(Cpu, regs_end) <= 64, "Cpu's registers fit saved[]");
 
 #define HL(z) ((uint16_t)((z)->h << 8 | (z)->l))
 #define DE(z) ((uint16_t)((z)->d << 8 | (z)->e))
@@ -51,11 +89,7 @@ static inline void cpu_ex_af(Cpu *z)
     uint8_t t;
 #define SWAP(x, y) (t = (x), (x) = (y), (y) = t)
     SWAP(z->a, z->a2);
-    SWAP(z->cf, z->cf2);
-    SWAP(z->zf, z->zf2);
-    SWAP(z->sf, z->sf2);
-    SWAP(z->hf, z->hf2);
-    SWAP(z->nf, z->nf2);
+    SWAP(z->f, z->f2);
 }
 static inline void cpu_exx(Cpu *z)
 {
@@ -68,94 +102,226 @@ static inline void cpu_exx(Cpu *z)
     SWAP(z->l, z->l2);
 #undef SWAP
 }
-/* PUSH / POP of a pair (the values only: the stack is the Cpu's own) */
-static inline void cpu_push(Cpu *z, uint16_t v) { z->stack[z->sp++ & 31] = v; }
-static inline uint16_t cpu_pop(Cpu *z) { return z->stack[--z->sp & 31]; }
-#define AF(z) ((uint16_t)((z)->a << 8 | (z)->sf << 7 | (z)->zf << 6 | (z)->hf << 4 | (z)->nf << 1 | (z)->cf))
+/* PUSH / POP of a pair, through memory as the Z80's (high byte first) */
+static inline void cpu_wr(Cpu *z, uint16_t a, uint8_t v);
+static inline uint8_t cpu_rd(const Cpu *z, uint16_t a);
+static inline void cpu_push(Cpu *z, uint16_t v)
+{
+    z->sp = (uint16_t)(z->sp - 1);
+    cpu_wr(z, z->sp, (uint8_t)(v >> 8));
+    z->sp = (uint16_t)(z->sp - 1);
+    cpu_wr(z, z->sp, (uint8_t)v);
+}
+static inline uint16_t cpu_pop(Cpu *z)
+{
+    uint16_t v = (uint16_t)(cpu_rd(z, z->sp) | cpu_rd(z, (uint16_t)(z->sp + 1)) << 8);
+    z->sp = (uint16_t)(z->sp + 2);
+    return v;
+}
+#define AF(z) ((uint16_t)((z)->a << 8 | (z)->f))
 static inline void cpu_set_af(Cpu *z, uint16_t v)
 {
     z->a = (uint8_t)(v >> 8);
-    z->sf = v >> 7 & 1, z->zf = v >> 6 & 1, z->hf = v >> 4 & 1, z->nf = v >> 1 & 1, z->cf = v & 1;
+    z->f = (uint8_t)v;
+}
+
+/* An instruction with accesses: where they fall (cpu_access) */
+static inline void cpu_insn(Cpu *z, const uint8_t *offs)
+{
+    z->partial = 0;
+    z->acc = 0;
+    z->offs = offs;
+    z->t_start = z->t;
+}
+
+/* An instruction that would end past its budget: stopped at the first of
+   its later fetches (`fo`, their offsets, 0 at the end) at or past it */
+static inline void cpu_fetch(Cpu *z, uint16_t pc, const uint8_t *fo)
+{
+    for (; *fo; fo++)
+        if (z->t + *fo >= z->limit) {
+            z->stopped = 1;
+            z->rep_n = 0;
+            z->part_pc = pc;
+            z->t_start = z->t;
+            z->t_stop = z->t + *fo;
+            memcpy(z->saved, z, offsetof(Cpu, regs_end));
+            z->pc = pc;
+            z->partial = 0;
+            longjmp(*z->jb, 1);
+        }
+}
+
+/* An instruction that would end past its budget: its registers kept, its
+   accesses checked (a replay's too) */
+static inline void cpu_part(Cpu *z, uint16_t pc, const uint8_t *offs)
+{
+    z->partial = 1;
+    z->acc = 0;
+    z->offs = offs;
+    if (z->stopped && z->part_pc == pc) { /* run again after a stop: replay */
+        z->stopped = 0;
+        z->rep_now = z->rep_n;
+        z->rep_n = 0;
+    } else {
+        z->rep_now = 0;
+        z->rep_n = 0;
+        z->part_pc = pc;
+        z->t_start = z->t;
+        memcpy(z->saved, z, offsetof(Cpu, regs_end));
+    }
+}
+
+/* An access: replayed (1), or made now (0); one at or past the budget stops
+   the program before it */
+static inline int cpu_access(Cpu *z, uint8_t *v, int read)
+{
+    int k = z->acc++;
+    if (k < z->rep_now) {
+        if (read) *v = z->rep[k];
+        return 1;
+    }
+    if (z->t_start + z->offs[k] >= z->limit) {
+        z->stopped = 1;
+        z->rep_n = (uint8_t)k;
+        z->t_stop = z->t_start + z->offs[k];
+        memcpy(z, z->saved, offsetof(Cpu, regs_end));
+        z->t = z->t_start;
+        z->pc = z->part_pc;
+        z->partial = 0;
+        longjmp(*z->jb, 1);
+    }
+    return 0;
 }
 
 /* A byte as the CPU reads it: its ROM below $1000 (main's below $4000), the board above */
-static inline uint8_t cpu_rd(const Cpu *z, uint16_t a)
+static inline uint8_t cpu_rd_raw(const Cpu *z, uint16_t a)
 {
     if (a < (z->rom ? 0x1000 : 0x4000)) return game_data(z->g, z->rom + a);
     if (a < 0x4000) return 0;
     return game_rd(z->g, a);
 }
-static inline void cpu_wr(Cpu *z, uint16_t a, uint8_t v) { game_wr(z->g, a, v); }
-static inline uint8_t cpu_ix(const Cpu *z, int d) { return cpu_rd(z, (uint16_t)(z->ix + d)); }
-static inline void cpu_set_ix(Cpu *z, int d, uint8_t v) { cpu_wr(z, (uint16_t)(z->ix + d), v); }
-static inline uint8_t cpu_iy(const Cpu *z, int d) { return cpu_rd(z, (uint16_t)(z->iy + d)); }
-static inline void cpu_set_iy(Cpu *z, int d, uint8_t v) { cpu_wr(z, (uint16_t)(z->iy + d), v); }
-
-static inline void cpu_zs(Cpu *z, uint8_t v)
+static inline uint8_t cpu_rd(const Cpu *zc, uint16_t a)
 {
-    z->zf = v == 0;
-    z->sf = v >> 7;
+    Cpu *z = (Cpu *)zc;
+    uint8_t v;
+    if (z->partial) {
+        int k = z->acc;
+        if (cpu_access(z, &v, 1)) return v;
+        v = cpu_rd_raw(z, a);
+        if (k < 8) z->rep[k] = v;
+        return v;
+    }
+    z->acc++;
+    return cpu_rd_raw(z, a);
+}
+static inline void cpu_wr(Cpu *z, uint16_t a, uint8_t v)
+{
+    int k = z->acc;
+    if (z->partial) {
+        if (cpu_access(z, NULL, 0)) return;
+    } else {
+        z->acc++;
+    }
+    z->t_access = z->offs ? z->t_start + z->offs[k] : z->t;
+    game_wr(z->g, a, v);
+}
+/* (IX+d), (IY+d): WZ the address */
+static inline uint8_t cpu_ix(Cpu *z, int d)
+{
+    z->wz = (uint16_t)(z->ix + d);
+    return cpu_rd(z, z->wz);
+}
+static inline void cpu_set_ix(Cpu *z, int d, uint8_t v)
+{
+    z->wz = (uint16_t)(z->ix + d);
+    cpu_wr(z, z->wz, v);
+}
+static inline uint8_t cpu_iy(Cpu *z, int d)
+{
+    z->wz = (uint16_t)(z->iy + d);
+    return cpu_rd(z, z->wz);
+}
+static inline void cpu_set_iy(Cpu *z, int d, uint8_t v)
+{
+    z->wz = (uint16_t)(z->iy + d);
+    cpu_wr(z, z->wz, v);
+}
+/* a word, low byte first */
+static inline void cpu_wr16(Cpu *z, uint16_t a, uint16_t v)
+{
+    cpu_wr(z, a, (uint8_t)v);
+    cpu_wr(z, (uint16_t)(a + 1), (uint8_t)(v >> 8));
+}
+
+/* F's bits */
+#define CPU_CF 0x01
+#define CPU_NF 0x02
+#define CPU_PF 0x04 /* parity / overflow */
+#define CPU_XF 0x08 /* bit 3, undocumented */
+#define CPU_HF 0x10
+#define CPU_YF 0x20 /* bit 5, undocumented */
+#define CPU_ZF 0x40
+#define CPU_SF 0x80
+
+/* S, Z and the undocumented bits of a result; with its parity */
+static inline uint8_t cpu_sz(uint8_t v) { return (uint8_t)((v & (CPU_SF | CPU_YF | CPU_XF)) | (v ? 0 : CPU_ZF)); }
+static inline uint8_t cpu_szp(uint8_t v)
+{
+    uint8_t p = v;
+    p ^= p >> 4;
+    p ^= p >> 2;
+    p ^= p >> 1;
+    return (uint8_t)(cpu_sz(v) | (p & 1 ? 0 : CPU_PF));
+}
+/* F set by the instruction ending at z->t (Q) */
+static inline void cpu_f(Cpu *z, int f)
+{
+    z->f = (uint8_t)f;
+    z->q_t = z->t;
 }
 
 /* the accumulator's operations */
 static inline void cpu_add(Cpu *z, uint8_t v)
 {
-    unsigned r = (unsigned)z->a + v;
-    z->hf = ((z->a ^ v ^ r) >> 4) & 1;
-    z->nf = 0;
-    z->cf = r > 0xFF;
+    int a = z->a, r = a + v;
+    cpu_f(z, cpu_sz((uint8_t)r) | (r >> 8 & CPU_CF) | ((a ^ v ^ r) & CPU_HF) | (((a ^ ~v) & (a ^ r) & 0x80) >> 5));
     z->a = (uint8_t)r;
-    cpu_zs(z, z->a);
 }
 static inline void cpu_adc(Cpu *z, uint8_t v)
 {
-    unsigned r = (unsigned)z->a + v + z->cf;
-    z->hf = ((z->a ^ v ^ r) >> 4) & 1;
-    z->nf = 0;
-    z->cf = r > 0xFF;
+    int a = z->a, r = a + v + (z->f & CPU_CF);
+    cpu_f(z, cpu_sz((uint8_t)r) | (r >> 8 & CPU_CF) | ((a ^ v ^ r) & CPU_HF) | (((a ^ ~v) & (a ^ r) & 0x80) >> 5));
     z->a = (uint8_t)r;
-    cpu_zs(z, z->a);
 }
+static inline int cpu_sub_f(Cpu *z, uint8_t v, int carry)
+{
+    int a = z->a, r = a - v - carry;
+    cpu_f(z, cpu_sz((uint8_t)r) | CPU_NF | (r >> 8 & CPU_CF) | ((a ^ v ^ r) & CPU_HF) | (((a ^ v) & (a ^ r) & 0x80) >> 5));
+    return r;
+}
+static inline void cpu_sub(Cpu *z, uint8_t v) { z->a = (uint8_t)cpu_sub_f(z, v, 0); }
+static inline void cpu_sbc(Cpu *z, uint8_t v) { z->a = (uint8_t)cpu_sub_f(z, v, z->f & CPU_CF); }
+/* CP: bits 3 and 5 from the operand */
 static inline void cpu_cp(Cpu *z, uint8_t v)
 {
-    unsigned r = (unsigned)z->a - v;
-    z->hf = ((z->a ^ v ^ r) >> 4) & 1;
-    z->nf = 1;
-    z->cf = z->a < v;
-    cpu_zs(z, (uint8_t)r);
-}
-static inline void cpu_sub(Cpu *z, uint8_t v)
-{
-    cpu_cp(z, v);
-    z->a = (uint8_t)(z->a - v);
-}
-static inline void cpu_sbc(Cpu *z, uint8_t v)
-{
-    unsigned r = (unsigned)z->a - v - z->cf;
-    z->hf = ((z->a ^ v ^ r) >> 4) & 1;
-    z->nf = 1;
-    z->cf = (unsigned)z->a < (unsigned)v + z->cf;
-    z->a = (uint8_t)r;
-    cpu_zs(z, z->a);
+    cpu_sub_f(z, v, 0);
+    z->f = (uint8_t)((z->f & ~(CPU_YF | CPU_XF)) | (v & (CPU_YF | CPU_XF)));
 }
 static inline void cpu_and(Cpu *z, uint8_t v)
 {
     z->a &= v;
-    z->cf = z->nf = 0;
-    z->hf = 1;
-    cpu_zs(z, z->a);
+    cpu_f(z, cpu_szp(z->a) | CPU_HF);
 }
 static inline void cpu_or(Cpu *z, uint8_t v)
 {
     z->a |= v;
-    z->cf = z->nf = z->hf = 0;
-    cpu_zs(z, z->a);
+    cpu_f(z, cpu_szp(z->a));
 }
 static inline void cpu_xor(Cpu *z, uint8_t v)
 {
     z->a ^= v;
-    z->cf = z->nf = z->hf = 0;
-    cpu_zs(z, z->a);
+    cpu_f(z, cpu_szp(z->a));
 }
 static inline void cpu_neg(Cpu *z)
 {
@@ -166,285 +332,174 @@ static inline void cpu_neg(Cpu *z)
 static inline void cpu_cpl(Cpu *z)
 {
     z->a = (uint8_t)~z->a;
-    z->hf = z->nf = 1;
+    cpu_f(z, (z->f & (CPU_SF | CPU_ZF | CPU_PF | CPU_CF)) | CPU_HF | CPU_NF | (z->a & (CPU_YF | CPU_XF)));
 }
+/* SCF, CCF: bits 3 and 5 from A or'd with F where the instruction before
+   left F as it was (Q); z->t already past the 4 cycles */
+static inline uint8_t cpu_q(const Cpu *z) { return z->q_t == z->t - 4 ? z->f : 0; }
 static inline void cpu_scf(Cpu *z)
 {
-    z->cf = 1;
-    z->hf = z->nf = 0;
+    cpu_f(z, (z->f & (CPU_SF | CPU_ZF | CPU_PF)) | CPU_CF | (((cpu_q(z) ^ z->f) | z->a) & (CPU_YF | CPU_XF)));
 }
 static inline void cpu_ccf(Cpu *z)
 {
-    z->hf = z->cf;
-    z->cf = !z->cf;
-    z->nf = 0;
+    cpu_f(z, ((z->f & (CPU_SF | CPU_ZF | CPU_PF | CPU_CF)) | (z->f & CPU_CF) << 4 |
+              (((cpu_q(z) ^ z->f) | z->a) & (CPU_YF | CPU_XF))) ^ CPU_CF);
 }
 static inline void cpu_daa(Cpu *z)
 {
-    uint8_t a = z->a, diff = 0, cf = 0;
-    if (z->cf || a > 0x99) {
-        diff |= 0x60;
-        cf = 1;
-    }
-    if (z->hf || (a & 0x0F) > 9) diff |= 0x06;
-    if (z->nf) {
-        z->hf = z->hf && (a & 0x0F) < 6;
-        z->a = (uint8_t)(a - diff);
-    } else {
-        z->hf = (a & 0x0F) > 9;
-        z->a = (uint8_t)(a + diff);
-    }
-    z->cf = cf;
-    cpu_zs(z, z->a);
+    uint8_t a = z->a, diff = 0, carry = z->f & CPU_CF;
+    if (carry || a > 0x99) diff = 0x60, carry = CPU_CF;
+    if ((z->f & CPU_HF) || (a & 0x0F) > 9) diff |= 0x06;
+    uint8_t r = z->f & CPU_NF ? (uint8_t)(a - diff) : (uint8_t)(a + diff);
+    uint8_t h = z->f & CPU_NF ? ((z->f & CPU_HF) && (a & 0x0F) < 6 ? CPU_HF : 0) : ((a & 0x0F) > 9 ? CPU_HF : 0);
+    cpu_f(z, cpu_szp(r) | (z->f & CPU_NF) | h | carry);
+    z->a = r;
 }
 /* INC r, DEC r: the carry kept */
 static inline uint8_t cpu_inc(Cpu *z, uint8_t v)
 {
-    v++;
-    z->hf = (v & 0x0F) == 0;
-    z->nf = 0;
-    cpu_zs(z, v);
-    return v;
+    uint8_t r = (uint8_t)(v + 1);
+    cpu_f(z, (z->f & CPU_CF) | cpu_sz(r) | ((v & 0x0F) == 0x0F ? CPU_HF : 0) | (r == 0x80 ? CPU_PF : 0));
+    return r;
 }
 static inline uint8_t cpu_dec(Cpu *z, uint8_t v)
 {
-    v--;
-    z->hf = (v & 0x0F) == 0x0F;
-    z->nf = 1;
-    cpu_zs(z, v);
-    return v;
+    uint8_t r = (uint8_t)(v - 1);
+    cpu_f(z, (z->f & CPU_CF) | CPU_NF | cpu_sz(r) | ((v & 0x0F) == 0 ? CPU_HF : 0) | (v == 0x80 ? CPU_PF : 0));
+    return r;
 }
-/* RLCA, RRCA, RLA, RRA: the carry (H, N cleared) */
+/* RLCA, RRCA, RLA, RRA */
 static inline void cpu_rlca(Cpu *z)
 {
-    z->cf = z->a >> 7;
-    z->a = (uint8_t)(z->a << 1 | z->cf);
-    z->hf = z->nf = 0;
+    z->a = (uint8_t)(z->a << 1 | z->a >> 7);
+    cpu_f(z, (z->f & (CPU_SF | CPU_ZF | CPU_PF)) | (z->a & (CPU_YF | CPU_XF | CPU_CF)));
 }
 static inline void cpu_rrca(Cpu *z)
 {
-    z->cf = z->a & 1;
-    z->a = (uint8_t)(z->a >> 1 | z->cf << 7);
-    z->hf = z->nf = 0;
+    uint8_t c = z->a & CPU_CF;
+    z->a = (uint8_t)(z->a >> 1 | z->a << 7);
+    cpu_f(z, (z->f & (CPU_SF | CPU_ZF | CPU_PF)) | c | (z->a & (CPU_YF | CPU_XF)));
 }
 static inline void cpu_rla(Cpu *z)
 {
     uint8_t c = z->a >> 7;
-    z->a = (uint8_t)(z->a << 1 | z->cf);
-    z->cf = c;
-    z->hf = z->nf = 0;
+    z->a = (uint8_t)(z->a << 1 | (z->f & CPU_CF));
+    cpu_f(z, (z->f & (CPU_SF | CPU_ZF | CPU_PF)) | (z->a & (CPU_YF | CPU_XF)) | c);
 }
 static inline void cpu_rra(Cpu *z)
 {
     uint8_t c = z->a & 1;
-    z->a = (uint8_t)(z->a >> 1 | z->cf << 7);
-    z->cf = c;
-    z->hf = z->nf = 0;
+    z->a = (uint8_t)(z->a >> 1 | (z->f & CPU_CF) << 7);
+    cpu_f(z, (z->f & (CPU_SF | CPU_ZF | CPU_PF)) | (z->a & (CPU_YF | CPU_XF)) | c);
 }
-/* the CB rotates and shifts of a value: carry, zero, sign (H, N cleared) */
+/* the CB rotates and shifts of a value */
 static inline uint8_t cpu_rot(Cpu *z, uint8_t v, uint8_t c)
 {
-    z->cf = c;
-    z->hf = z->nf = 0;
-    cpu_zs(z, v);
+    cpu_f(z, cpu_szp(v) | c);
     return v;
 }
 static inline uint8_t cpu_rrc(Cpu *z, uint8_t v) { return cpu_rot(z, (uint8_t)(v >> 1 | v << 7), v & 1); }
 static inline uint8_t cpu_rlc(Cpu *z, uint8_t v) { return cpu_rot(z, (uint8_t)(v << 1 | v >> 7), v >> 7); }
-static inline uint8_t cpu_rl(Cpu *z, uint8_t v) { return cpu_rot(z, (uint8_t)(v << 1 | z->cf), v >> 7); }
-static inline uint8_t cpu_rr(Cpu *z, uint8_t v) { return cpu_rot(z, (uint8_t)(v >> 1 | z->cf << 7), v & 1); }
+static inline uint8_t cpu_rl(Cpu *z, uint8_t v) { return cpu_rot(z, (uint8_t)(v << 1 | (z->f & CPU_CF)), v >> 7); }
+static inline uint8_t cpu_rr(Cpu *z, uint8_t v) { return cpu_rot(z, (uint8_t)(v >> 1 | (z->f & CPU_CF) << 7), v & 1); }
 static inline uint8_t cpu_sla(Cpu *z, uint8_t v) { return cpu_rot(z, (uint8_t)(v << 1), v >> 7); }
 static inline uint8_t cpu_sra(Cpu *z, uint8_t v) { return cpu_rot(z, (uint8_t)(v >> 1 | (v & 0x80)), v & 1); }
 static inline uint8_t cpu_srl(Cpu *z, uint8_t v) { return cpu_rot(z, (uint8_t)(v >> 1), v & 1); }
-/* BIT n: the zero flag (H set, N cleared) */
-static inline void cpu_bit(Cpu *z, int n, uint8_t v)
+/* BIT n of a register (bits 3 and 5 from it), of memory (from WZ's high byte) */
+static inline void cpu_bit_xy(Cpu *z, int n, uint8_t v, uint8_t xy)
 {
-    z->zf = !(v >> n & 1);
-    z->hf = 1;
-    z->nf = 0;
+    uint8_t r = v & (1 << n);
+    cpu_f(z, (z->f & CPU_CF) | CPU_HF | (r ? 0 : CPU_ZF | CPU_PF) | (r & CPU_SF) | (xy & (CPU_YF | CPU_XF)));
 }
+static inline void cpu_bit(Cpu *z, int n, uint8_t v) { cpu_bit_xy(z, n, v, v); }
+static inline void cpu_bit_mem(Cpu *z, int n, uint8_t v) { cpu_bit_xy(z, n, v, (uint8_t)(z->wz >> 8)); }
 /* RLD, RRD: A's low nibble and (HL)'s */
 static inline void cpu_rld(Cpu *z)
 {
     uint8_t m = cpu_rd(z, HL(z));
+    z->wz = (uint16_t)(HL(z) + 1);
     cpu_wr(z, HL(z), (uint8_t)(m << 4 | (z->a & 0x0F)));
     z->a = (uint8_t)((z->a & 0xF0) | m >> 4);
-    z->hf = z->nf = 0;
-    cpu_zs(z, z->a);
+    cpu_f(z, (z->f & CPU_CF) | cpu_szp(z->a));
 }
 static inline void cpu_rrd(Cpu *z)
 {
     uint8_t m = cpu_rd(z, HL(z));
+    z->wz = (uint16_t)(HL(z) + 1);
     cpu_wr(z, HL(z), (uint8_t)(z->a << 4 | m >> 4));
     z->a = (uint8_t)((z->a & 0xF0) | (m & 0x0F));
-    z->hf = z->nf = 0;
-    cpu_zs(z, z->a);
+    cpu_f(z, (z->f & CPU_CF) | cpu_szp(z->a));
+}
+/* LD A,I / LD A,R */
+static inline void cpu_ld_a_ir(Cpu *z, uint8_t v)
+{
+    z->a = v;
+    cpu_f(z, (z->f & CPU_CF) | cpu_sz(v) | (z->iff2 ? CPU_PF : 0));
 }
 
-/* 16 bits: ADD HL (the carry), ADC HL and SBC HL (carry, zero, sign) */
+/* 16 bits: ADD HL (IX, IY), ADC HL, SBC HL; WZ the first operand + 1 */
 static inline uint16_t cpu_add16(Cpu *z, uint16_t a, uint16_t b)
 {
     uint32_t r = (uint32_t)a + b;
-    z->hf = ((a ^ b ^ r) >> 12) & 1;
-    z->nf = 0;
-    z->cf = r > 0xFFFF;
+    z->wz = (uint16_t)(a + 1);
+    cpu_f(z, (z->f & (CPU_SF | CPU_ZF | CPU_PF)) | ((a ^ b ^ r) >> 8 & CPU_HF) | (r >> 16 & CPU_CF) |
+                 (r >> 8 & (CPU_YF | CPU_XF)));
     return (uint16_t)r;
 }
 static inline uint16_t cpu_adc16(Cpu *z, uint16_t a, uint16_t b)
 {
-    uint32_t r = (uint32_t)a + b + z->cf;
-    z->hf = ((a ^ b ^ r) >> 12) & 1;
-    z->nf = 0;
-    z->cf = r > 0xFFFF;
-    z->zf = (uint16_t)r == 0;
-    z->sf = (uint8_t)(r >> 15 & 1);
+    uint32_t r = (uint32_t)a + b + (z->f & CPU_CF);
+    z->wz = (uint16_t)(a + 1);
+    cpu_f(z, (int)((r >> 8 & (CPU_SF | CPU_YF | CPU_XF)) | ((r & 0xFFFF) ? 0 : CPU_ZF) | ((a ^ b ^ r) >> 8 & CPU_HF) |
+                   (((a ^ ~b) & (a ^ r) & 0x8000) >> 13) | (r >> 16 & CPU_CF)));
     return (uint16_t)r;
 }
 static inline uint16_t cpu_sbc16(Cpu *z, uint16_t a, uint16_t b)
 {
-    uint32_t r = (uint32_t)a - b - z->cf;
-    z->hf = ((a ^ b ^ r) >> 12) & 1;
-    z->nf = 1;
-    z->cf = (uint32_t)a < (uint32_t)b + z->cf;
-    z->zf = (uint16_t)r == 0;
-    z->sf = (uint8_t)(r >> 15 & 1);
+    uint32_t r = (uint32_t)a - b - (z->f & CPU_CF);
+    z->wz = (uint16_t)(a + 1);
+    cpu_f(z, (int)((r >> 8 & (CPU_SF | CPU_YF | CPU_XF)) | ((r & 0xFFFF) ? 0 : CPU_ZF) | ((a ^ b ^ r) >> 8 & CPU_HF) |
+                   (((a ^ b) & (a ^ r) & 0x8000) >> 13) | (r >> 16 & CPU_CF) | CPU_NF));
     return (uint16_t)r;
 }
 
-/* the block instructions */
-static inline void cpu_ldi(Cpu *z)
+/* the block instructions (LDIR, LDDR, CPIR a step each, cpu_repeat when
+   they go again) */
+static inline void cpu_ld_step(Cpu *z, int step)
 {
-    cpu_wr(z, DE(z), cpu_rd(z, HL(z)));
-    SET_HL(z, HL(z) + 1);
-    SET_DE(z, DE(z) + 1);
+    uint8_t v = cpu_rd(z, HL(z));
+    cpu_wr(z, DE(z), v);
+    SET_HL(z, HL(z) + step);
+    SET_DE(z, DE(z) + step);
     SET_BC(z, BC(z) - 1);
-    z->hf = z->nf = 0;
-    z->pf = BC(z) != 0;
+    uint8_t n = (uint8_t)(v + z->a);
+    cpu_f(z, (z->f & (CPU_SF | CPU_ZF | CPU_CF)) | (n & CPU_XF) | (n << 4 & CPU_YF) | (BC(z) ? CPU_PF : 0));
 }
-static inline void cpu_ldd(Cpu *z)
-{
-    cpu_wr(z, DE(z), cpu_rd(z, HL(z)));
-    SET_HL(z, HL(z) - 1);
-    SET_DE(z, DE(z) - 1);
-    SET_BC(z, BC(z) - 1);
-    z->hf = z->nf = 0;
-    z->pf = BC(z) != 0;
-}
-/* LDIR, LDDR, CPIR whole: 21 cycles a step, 16 the last */
-static inline void cpu_ldir(Cpu *z)
-{
-    for (;;) {
-        cpu_ldi(z);
-        if (!z->pf) break;
-        z->t += 21;
-    }
-    z->t += 16;
-}
-static inline void cpu_lddr(Cpu *z)
-{
-    for (;;) {
-        cpu_ldd(z);
-        if (!z->pf) break;
-        z->t += 21;
-    }
-    z->t += 16;
-}
+static inline void cpu_ldi(Cpu *z) { cpu_ld_step(z, 1); }
+static inline void cpu_ldd(Cpu *z) { cpu_ld_step(z, -1); }
 static inline void cpu_cpi(Cpu *z)
 {
     uint8_t v = cpu_rd(z, HL(z)), r = (uint8_t)(z->a - v);
-    z->hf = ((z->a ^ v ^ r) >> 4) & 1;
-    z->nf = 1;
-    cpu_zs(z, r);
+    int h = (z->a ^ v ^ r) & CPU_HF;
     SET_HL(z, HL(z) + 1);
     SET_BC(z, BC(z) - 1);
-    z->pf = BC(z) != 0;
+    z->wz = (uint16_t)(z->wz + 1);
+    uint8_t n = (uint8_t)(r - (h ? 1 : 0));
+    cpu_f(z, (z->f & CPU_CF) | CPU_NF | (cpu_sz(r) & (CPU_SF | CPU_ZF)) | h | (n & CPU_XF) | (n << 4 & CPU_YF) |
+                 (BC(z) ? CPU_PF : 0));
 }
-static inline void cpu_cpir(Cpu *z)
+/* a block instruction at `pc` going again: bits 3 and 5 from its address */
+static inline void cpu_repeat(Cpu *z, uint16_t pc)
 {
-    for (;;) {
-        cpu_cpi(z);
-        if (!z->pf || z->zf) break;
-        z->t += 21;
-    }
-    z->t += 16;
+    z->wz = (uint16_t)(pc + 1);
+    z->f = (uint8_t)((z->f & ~(CPU_XF | CPU_YF)) | (pc >> 8 & (CPU_XF | CPU_YF)));
 }
 
-/* $0010 (main's and sub's, after its RST): HL += A, A the new L, with the
-   cycles of its ADD A,L / LD L,A / RET NC / INC H / RET */
-static inline void cpu_add_hl_a(Cpu *z)
-{
-    cpu_add(z, z->l);
-    z->l = z->a;
-    if (z->cf) {
-        z->h++;
-        z->t += 4 + 4 + 5 + 4 + 10;
-    } else {
-        z->t += 4 + 4 + 11;
-    }
-}
-/* RST $10 */
-static inline void cpu_rst10(Cpu *z)
-{
-    z->t += 11;
-    cpu_add_hl_a(z);
-}
-/* RST $08: HL += 2A ($0008: ADD A,A / JR NC,$0010 / INC H / JP $0010) */
-static inline void cpu_rst08(Cpu *z)
-{
-    z->t += 11;
-    cpu_add(z, z->a);
-    if (z->cf) {
-        z->h++;
-        z->t += 4 + 7 + 4 + 10;
-    } else {
-        z->t += 4 + 12;
-    }
-    cpu_add_hl_a(z);
-}
 /* a word as the CPU reads it */
 static inline uint16_t cpu_rd16(const Cpu *z, uint16_t a)
 {
     return (uint16_t)(cpu_rd(z, a) | cpu_rd(z, (uint16_t)(a + 1)) << 8);
-}
-
-/* main's $1061 and sub's $0EAE: HL / A (17 steps of ADC A / ADC HL), HL
-   the quotient, A the remainder */
-static inline void cpu_divide(Cpu *z)
-{
-    uint8_t c = z->a, a = 0;
-    int cy = 0;
-    uint16_t hl = HL(z);
-    for (int i = 0; i < 17; i++) {
-        unsigned t = (unsigned)a * 2 + (unsigned)cy;
-        a = (uint8_t)t;
-        if (t > 0xFF) {
-            a = (uint8_t)(a - c);
-            cy = 1;
-        } else if (a < c) {
-            cy = 0;
-        } else {
-            a = (uint8_t)(a - c);
-            cy = 1;
-        }
-        uint32_t n = (uint32_t)hl * 2 + (uint32_t)cy;
-        hl = (uint16_t)n;
-        cy = (int)(n >> 16);
-    }
-    SET_HL(z, hl);
-    z->a = a;
-    z->cf = (uint8_t)cy;
-    z->zf = hl == 0;
-    z->sf = (uint8_t)(hl >> 15);
-}
-
-/* main's $104E and sub's $0E9B: HL * A, A left 0 */
-static inline void cpu_multiply(Cpu *z)
-{
-    SET_HL(z, HL(z) * z->a);
-    z->a = 0;
-    z->cf = z->nf = 0;
-    z->zf = z->hf = 1;
-    z->sf = 0;
 }
 
 #endif

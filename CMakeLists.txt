@@ -49,12 +49,11 @@ add_library(galaga_core STATIC
   src/emu/wsg.c
   src/emu/noise54.c
   src/sim/game.c
-  src/sim/sound.c
-  src/sim/sub.c
-  src/sim/routines.c
-  src/sim/tasks.c
-  src/sim/io.c
-  src/sim/fg.c
+  src/sim/main_run.c
+  src/sim/sub_run.c
+  src/sim/sub2_run.c
+  src/sim/m51_run.c
+  src/sim/m54_run.c
   src/sim/sim.c
 )
 target_include_directories(galaga_core PUBLIC src)
@@ -145,16 +144,14 @@ if(EXISTS "${GALAGA_ROM}")
   add_executable(test_extract src/tests/test_extract.c)
   target_link_libraries(test_extract PRIVATE galaga_core)
   add_test(NAME extract COMMAND test_extract "${GALAGA_ROM}" "${CMAKE_BINARY_DIR}/extract_test")
-  add_executable(test_sim src/tests/test_sim.c src/tests/player.c)
-  target_link_libraries(test_sim PRIVATE galaga_core)
-  add_test(NAME sim COMMAND test_sim "${GALAGA_ROM}")
-  add_executable(test_io src/tests/test_io.c)
-  target_link_libraries(test_io PRIVATE galaga_core)
-  add_test(NAME io COMMAND test_io "${GALAGA_ROM}")
+  add_executable(test_mcu src/tests/test_mcu.c)
+  target_link_libraries(test_mcu PRIVATE galaga_core)
+  add_test(NAME mcu COMMAND test_mcu "${GALAGA_ROM}")
   add_executable(test_frame src/tests/test_frame.c src/tests/player.c)
   target_link_libraries(test_frame PRIVATE galaga_core)
-  # test_frame: not yet a test (the C game's scheduler is under way)
-  set_tests_properties(rom_load extract sim io PROPERTIES LABELS rom)
+  add_test(NAME frame COMMAND test_frame "${GALAGA_ROM}")
+  set_tests_properties(rom_load extract mcu frame PROPERTIES LABELS rom)
+  set_tests_properties(mcu frame PROPERTIES SKIP_RETURN_CODE 77)
   # Development builds extract the assets next to the program after each build.
   if(NOT CMAKE_CROSSCOMPILING)
     add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/assets/manifest.txt"
