@@ -5,8 +5,10 @@ A C11 / SDL2 port of the 1981 Namco arcade game for Linux handhelds
 web, checked against the original ROM running in MAME.
 
 **Status:** the game runs in C, equal frame for frame (pictures and sound)
-to an emulated Galaga board that is itself checked against MAME. Next: the
-DIP switch menu, high-score saving, cocktail flip and release. See
+to an emulated Galaga board that is itself checked against MAME, with the
+DIP switches (`galaga.cfg` and an operator menu), the high scores kept
+(`galaga.hiscore`) and the cocktail table's flip. Next: testing on devices
+and a release. See
 [GALAGA_PORT_PLAN.md](GALAGA_PORT_PLAN.md).
 
 You need your own MAME `galaga` ROM set (`galaga.zip`); none is included.
@@ -36,6 +38,7 @@ every connected pad drives the panel.
 | Next graphics preset | Select + L1 | F3 |
 | Glow on / off | | F4 |
 | CRT scanlines on / off | | F5 |
+| Operator menu (DIP switches) | Select + R1 | F2 |
 | Quit | hold Select + Start for 1 s | Esc |
 
 ## Building
