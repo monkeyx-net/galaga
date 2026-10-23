@@ -22,3 +22,10 @@ set(capture_frames 750 900 1100 1300 1500 1700 2000 2400 2800 3200 3600 4000 440
 # frames whose instructions are traced on every CPU: play, the aliens diving
 set(trace_from 1700)
 set(trace_to 1800)
+
+# The cocktail run (mame_cocktail): the Cabinet switch on cocktail, two
+# coins, a 2-player start, no play: the turns change as the ships are lost,
+# player two's ($A007 set) drawn turned round
+set(cocktail_script "1050:coin 1060: 1080:coin 1090: 1150:start2 1160:")
+set(cocktail_fields "Cabinet=0")
+set(cocktail_frames 3500 3800 4100 4580 4700 5300 5420 5780 6020)

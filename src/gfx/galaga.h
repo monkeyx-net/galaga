@@ -27,6 +27,10 @@
  *   each vertical blank the origin moves by -1, -2, -3, -4, +3, +2, +1 or 0
  *   steps by $A000-$A002 (bits 0-2), the stars shown or not.
  * - Tiles are drawn over the sprites, the sprites over the stars.
+ * - $A007 (the cocktail table, set for player two's turns) turns the tiles'
+ *   picture round; the sprites stay where the game puts them (it places
+ *   them for the turned screen), each turned round in its place (both its
+ *   flips inverted).
  */
 #ifndef GALAGA_GFX_GALAGA_H
 #define GALAGA_GFX_GALAGA_H

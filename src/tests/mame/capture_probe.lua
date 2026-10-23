@@ -91,7 +91,8 @@ _G.capture_frames = emu.add_machine_frame_notifier(function()
     for what, name in pairs(NAMES) do
         if fields[name] then fields[name]:set_value(held[what] and 1 or 0) end
     end
-    for _, f in ipairs(set_fields) do f.field:set_value(f.value) end
+    -- a DIP switch's setting is its field's value under its mask (Cabinet=0: cocktail)
+    for _, f in ipairs(set_fields) do f.field.user_value = f.value end
     if frame >= poke_from then
         for _, p in ipairs(pokes) do space:write_u8(p.addr, p.value) end
     end

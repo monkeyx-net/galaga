@@ -183,7 +183,11 @@ if(MAME_EXECUTABLE AND EXISTS "${GALAGA_ROM}")
     COMMAND ${CMAKE_COMMAND} -DMAME=${MAME_EXECUTABLE} -DROMPATH=${rom_parent} -DWORKDIR=${CMAKE_BINARY_DIR}/mame
       -DROM=${GALAGA_ROM} -DPROBE=${CMAKE_SOURCE_DIR}/src/tests/mame/trace_probe.lua -DCHECK=$<TARGET_FILE:test_emu>
       -P ${CMAKE_SOURCE_DIR}/src/tests/mame/emu.cmake)
-  set_tests_properties(mame_capture PROPERTIES LABELS mame TIMEOUT 600 RESOURCE_LOCK mame_workdir)
+  add_test(NAME mame_cocktail
+    COMMAND ${CMAKE_COMMAND} -DMAME=${MAME_EXECUTABLE} -DROMPATH=${rom_parent} -DWORKDIR=${CMAKE_BINARY_DIR}/mame
+      -DROM=${GALAGA_ROM} -DPROBE=${CMAKE_SOURCE_DIR}/src/tests/mame/capture_probe.lua -DCHECK=$<TARGET_FILE:test_capture>
+      -DRUN=cocktail -P ${CMAKE_SOURCE_DIR}/src/tests/mame/capture.cmake)
+  set_tests_properties(mame_capture mame_cocktail PROPERTIES LABELS mame TIMEOUT 600 RESOURCE_LOCK mame_workdir)
   set_tests_properties(mame_emu PROPERTIES LABELS mame TIMEOUT 1800 RESOURCE_LOCK mame_workdir DEPENDS mame_capture)
   message(STATUS "MAME reference tests enabled (${MAME_EXECUTABLE})")
 else()

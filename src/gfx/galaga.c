@@ -176,6 +176,7 @@ static void draw_sprites(GalagaVideo *v, const GalagaFrame *f)
         int sx = f->ram[1][a] - 17;
         int sy = f->ram[1][a + 1] + 256 * (f->ram[2][a + 1] & 1) - 40;
         int flip_v = flags & 1, flip_h = flags >> 1 & 1, tall = flags >> 2 & 1, wide = flags >> 3 & 1;
+        if (f->vlatch[7] & 1) flip_v ^= 1, flip_h ^= 1; /* flipped: each sprite turned round where it is */
         for (int qy = 0; qy <= tall; qy++)
             for (int qx = 0; qx <= wide; qx++) {
                 int lower = tall && (qy ^ flip_v), left = wide && !(qx ^ flip_h);
@@ -195,8 +196,10 @@ static void draw_tiles(GalagaVideo *v, const GalagaFrame *f)
                 for (int x = 0; x < 8; x++) {
                     uint8_t lk = v->tile_lookup[colour * 4 + t[y][x]];
                     if (lk != 15) {
-                        v->screen[cy * 8 + y][cx * 8 + x] = v->palette[16 + lk];
-                        v->drawn[cy * 8 + y][cx * 8 + x] = 1;
+                        int py = cy * 8 + y, px = cx * 8 + x;
+                        if (f->vlatch[7] & 1) py = GALAGA_H - 1 - py, px = GALAGA_W - 1 - px; /* flipped: turned round */
+                        v->screen[py][px] = v->palette[16 + lk];
+                        v->drawn[py][px] = 1;
                     }
                 }
         }

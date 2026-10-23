@@ -217,7 +217,18 @@ Not yet like MAME:
   its credit mode, the board can hand main the bytes one place out (MAME
   does not), and the game then waits for a start forever. `sim` powers
   the board on again after each game.
-- The flip ($A007, the cocktail table): to do (E3).
+- The flip ($A007, the cocktail table; main sets it for player two's
+  turns): the tiles' picture turned round, the sprites left where the game
+  puts them (it places them for the turned screen), each turned round in
+  its place (both its flip bits inverted); the stars as ever. Measured on
+  MAME's cocktail run (`mame_cocktail`: every pixel bar the stars, flipped
+  or not). MAME's DIP switches are set through a field's `user_value`.
+- The high scores (`galaga.hiscore`): the table at $8A20 (five scores of
+  six digit tiles, the units first, $24 blank) and $8A3E (three initials
+  each), filled from the ROM at power-on ($0310) as main enters the attract
+  mode ($9201 = 1); the HIGH SCORE at the top ($83ED-$83F2) is drawn from
+  the ROM's default, not the table ($00D6). The port puts its saved table
+  in, and its first score at the top, right after.
 
 ### 2.1 Sound (E2, measured from MAME's output)
 
@@ -328,7 +339,7 @@ To confirm by probe (written up here as confirmed):
 | E2 | The WSG (waveforms from prom-1.1d), the 54xx's noise modelled from MAME's output | each voice exact; the noise's level and timing as MAME's wav | done 2026-10-22 |
 | X1 | Extractor: tiles, sprites, palette, lookups, waveforms, font, tables | `extract` | done 2026-10-22 (tables as the C phases need them) |
 | C0-C3 | RE notes; the C game (the five CPUs' programs, the board's scheduler), then the default | `mcu`, `frame`; the C game plays from power-on through game over | done 2026-10-23: the default, equal to the board every frame (memory, latches, sound) from power-on through a game |
-| E3/E4 | Polish (cocktail flip, devices, web), the DIP switches' menu, high-score saving, release | device checklist; published | to do |
+| E3/E4 | Polish (cocktail flip, devices, web), the DIP switches' menu, high-score saving, release | device checklist; published | under way: the flip, the DIP switches (`galaga.cfg`, the operator menu), the high scores, the controls page |
 
 Each phase gets its own commit. Nothing is pushed or published without
 asking.
@@ -370,6 +381,9 @@ asking.
   `emu/mb88.c` running the device ROMs, an instruction at a time from the
   same random inputs (K, R, the interrupt, the timer): cycles, registers,
   RAM and ports equal at every step
+- `mame_cocktail` - label `mame`: MAME on the cocktail table, a 2-player
+  game left alone: the pictures drawn from its dumps equal its snapshots
+  (bar the stars), player two's turns turned round
 - `frame` - label `rom`: the C game and the board from power-on with the
   tests' player (an attract cycle, then a game to its end): all memory,
   the latches, the WSG's registers and the frame's sound equal at every

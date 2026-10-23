@@ -4,7 +4,9 @@
 #   - mame_emu (emu.cmake) reuses the run: the emulated board against all of
 #     it, memory and pictures at every captured frame, and the sound (MAME's
 #     recording of the run, game.wav)
-#   cmake -DMAME=... -DROMPATH=... -DWORKDIR=... -DROM=... -DPROBE=capture_probe.lua -DCHECK=test_capture -P capture.cmake
+#   - mame_cocktail (-DRUN=cocktail): the cocktail run (script.cmake), its
+#     pictures only, player two's turned round
+#   cmake -DMAME=... -DROMPATH=... -DWORKDIR=... -DROM=... -DPROBE=capture_probe.lua -DCHECK=test_capture [-DRUN=cocktail] -P capture.cmake
 foreach(v MAME ROMPATH WORKDIR ROM PROBE CHECK)
   if(NOT DEFINED ${v})
     message(FATAL_ERROR "capture.cmake: ${v} not set")
@@ -14,6 +16,14 @@ include("${CMAKE_CURRENT_LIST_DIR}/mame_common.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/script.cmake")
 
 set(out "${WORKDIR}/capture")
+set(wav -wavwrite "${out}/game.wav")
+if(RUN STREQUAL "cocktail")
+  set(out "${WORKDIR}/capture_cocktail")
+  set(wav)
+  set(capture_script "${cocktail_script}")
+  set(capture_frames ${cocktail_frames})
+  set(ENV{PROBE_FIELDS} "${cocktail_fields}")
+endif()
 file(REMOVE_RECURSE "${out}" "${WORKDIR}/snap")
 file(MAKE_DIRECTORY "${out}")
 set(ENV{PROBE_OUT} "${out}")
@@ -22,7 +32,7 @@ set(ENV{PROBE_FRAMES} "${frame_list}")
 list(GET capture_frames -1 last)
 set(ENV{PROBE_LAST} ${last})
 set(ENV{PROBE_SCRIPT} "${capture_script}")
-execute_process(COMMAND "${MAME}" ${mame_args} -seconds_to_run 300 -samplerate 48000 -wavwrite "${out}/game.wav"
+execute_process(COMMAND "${MAME}" ${mame_args} -seconds_to_run 300 -samplerate 48000 ${wav}
                   -autoboot_script "${PROBE}"
                 RESULT_VARIABLE rc OUTPUT_QUIET ERROR_QUIET)
 if(NOT rc EQUAL 0)

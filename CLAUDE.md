@@ -72,8 +72,9 @@ phases not yet done (see the plan's table) arrive with them.
 - `main.c` - SDL setup, the fixed 60 Hz loop running a frame of the C game
   per tick (or of the board, `--emulate`), the graphics pipeline, the test
   card (`--test-card`, or no ROM set or assets), `--frames`,
-  `--screenshot`, `--rom`, `--check-rom`, `--dump-rom`; later the DIP
-  switches (`galaga.cfg`), the high scores (`galaga.hiscore`)
+  `--screenshot`, `--input`, `--rom`, `--check-rom`, `--dump-rom`; the DIP
+  switches (`galaga.cfg`, the operator menu), the high scores
+  (`galaga.hiscore`), the controls page
 - `platform/` - the only code that includes SDL: `video.c` (224x288
   portrait framebuffer, integer scaling or fitted with sharp bilinear,
   scanlines down the screen), `input.c` (Galaga's control panel; pads and
@@ -84,7 +85,7 @@ phases not yet done (see the plan's table) arrive with them.
   `debugfont.c` (3x5 font for diagnostics, not the ROM's), `galaga.c`
   (a frame from the video RAM, sprite RAM and latches: tiles, sprites
   with their flips and doubling, the PROM colours, the 05xx's stars from
-  its shift register)
+  its shift register, the cocktail flip)
 - `assets/` - `rom.c` (the galaga set and the device ROMs from zips or a
   folder, matched by CRC), `zip.c`, `inflate.c`, `png.c`, `assets.c`
   (asset folder lookup), `savefile.c` (the save folder), `extract.c`
@@ -148,6 +149,8 @@ section 4).
   `src/tests/mame/script.cmake`, dumping video RAM, RAM and the latches
   with a snapshot at 15 frames; each frame drawn from its dump equals
   MAME's (bar the stars)
+- `mame_cocktail` - label `mame`: the same check on a cocktail-table run
+  (player two's turns flipped, `$A007`)
 - `mame_emu` - label `mame`: the board replays that script from power-on:
   MAME's traces of frames 1700-1800 (main, sub, sub2, 54xx instruction for
   instruction; the 51xx reported only, plan section 2); video RAM, all

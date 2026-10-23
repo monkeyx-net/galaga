@@ -5,7 +5,7 @@
  * dumped at its vertical blank (gfx/galaga.c), and compares the picture
  * with MAME's (224x288) pixel for pixel, bar the stars where nothing else
  * is drawn (the starfield depends on the frames since power-on: test_emu
- * checks them).
+ * checks them). TEST_CAPTURE_OUT=<file.png> writes the port's picture.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,6 +83,16 @@ int main(int argc, char **argv)
     vlatch[5] = 0; /* no stars: where the starfield stands is not in the dump */
     GalagaFrame fr = { vram, { ram[0], ram[1], ram[2] }, vlatch, 0 };
     galaga_draw(&video, &fr);
+    if (getenv("TEST_CAPTURE_OUT")) {
+        static uint8_t rgba[GALAGA_H * GALAGA_W * 4];
+        for (int y = 0; y < GALAGA_H; y++)
+            for (int x = 0; x < GALAGA_W; x++) {
+                uint8_t *q = rgba + ((size_t)y * GALAGA_W + (size_t)x) * 4;
+                q[0] = (uint8_t)(video.screen[y][x] >> 16), q[1] = (uint8_t)(video.screen[y][x] >> 8);
+                q[2] = (uint8_t)video.screen[y][x], q[3] = 255;
+            }
+        png_write(getenv("TEST_CAPTURE_OUT"), rgba, GALAGA_W, GALAGA_H);
+    }
 
     Image shot;
     const char *perr;
