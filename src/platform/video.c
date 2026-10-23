@@ -93,7 +93,7 @@ static SDL_Texture *fit_target(int scale)
     return target;
 }
 
-void video_present(const Framebuffer *fb, bool scanlines)
+void video_present(const Framebuffer *fb, bool fresh, bool scanlines)
 {
     if (!texture || tex_w != fb->w || tex_h != fb->h) {
         if (texture) SDL_DestroyTexture(texture);
@@ -105,8 +105,9 @@ void video_present(const Framebuffer *fb, bool scanlines)
             SDL_Log("SDL_CreateTexture: %s", SDL_GetError());
             return;
         }
+        fresh = true;
     }
-    SDL_UpdateTexture(texture, NULL, fb->px, fb->w * (int)sizeof(uint32_t));
+    if (fresh) SDL_UpdateTexture(texture, NULL, fb->px, fb->w * (int)sizeof(uint32_t));
 
     int out_w, out_h, integer;
     SDL_GetRendererOutputSize(renderer, &out_w, &out_h);

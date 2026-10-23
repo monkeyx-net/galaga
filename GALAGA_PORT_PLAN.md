@@ -397,3 +397,9 @@ asking.
 - Galaxian's "MAME raises the NMI a cycle before the line starts" may be
   MAME's scheduler: its divisor rounding, its slices, and the Z80 stopping
   between machine cycles (section 2) are worth trying there.
+- The main loop draws a frame only when the game stepped (a faster display
+  shows it again, its texture not uploaded again) and waits a millisecond
+  when presenting does not block (no vsync); the scalers read neighbours
+  without bounds checks inside the picture and skip the premultiplying of
+  an opaque, clamped picture (the output the same, bit for bit). The
+  shared `main.c`, `platform/video.c` and `gfx/scale.c` came from there.
