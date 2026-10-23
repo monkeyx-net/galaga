@@ -13,8 +13,7 @@ int video_display_scale(void);
    scale, or (when that would leave much of the screen unused, as on
    640x480) fitted to the screen, pillarboxed; with CRT scanlines over it
    if `scanlines` (down the screen: the monitor is turned). */
-/* fresh: fb holds a new frame (else the last one is shown again, not uploaded) */
-void video_present(const Framebuffer *fb, bool fresh, bool scanlines);
+void video_present(const Framebuffer *fb, bool scanlines);
 void video_shutdown(void);
 
 #endif

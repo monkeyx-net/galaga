@@ -724,9 +724,8 @@ static bool run_once(void)
     /* Headless runs step once per loop so the frame count is exact. */
     if (max_frames >= 0 && acc < step_ticks) acc = step_ticks;
 
-    bool stepped = false;
+    long stepped = frames;
     while (acc >= step_ticks) {
-        stepped = true;
         InputFrame in;
         input_poll(&in);
 #ifndef __EMSCRIPTEN__
@@ -738,20 +737,15 @@ static bool run_once(void)
         acc -= step_ticks;
         if (max_frames >= 0 && frames >= max_frames) break;
     }
-    /* drawn once a tick: a faster display shows the frame again */
-    static bool drawn_once;
-    bool fresh = (stepped || !drawn_once) && (max_frames < 0 || frames >= max_frames);
-    if (fresh) {
-        draw(video_display_scale());
-        drawn_once = true;
+    if (frames == stepped) {
+#ifndef __EMSCRIPTEN__
+        Uint64 ms = (step_ticks - acc) * 1000 / SDL_GetPerformanceFrequency();
+        SDL_Delay(ms > 1 ? (Uint32)ms : 1);
+#endif
+        return true; /* the last picture stays */
     }
-    if (max_frames < 0) {
-        Uint64 t = SDL_GetPerformanceCounter();
-        video_present(shown, fresh, g.gfx.scanlines); /* blocks on vsync */
-        /* no vsync (a software renderer): wait for the next tick, not spin */
-        if (SDL_GetPerformanceCounter() - t < SDL_GetPerformanceFrequency() / 1000 && acc + 2 * (SDL_GetPerformanceFrequency() / 1000) < step_ticks)
-            SDL_Delay(1);
-    }
+    if (max_frames < 0 || frames >= max_frames) draw(video_display_scale());
+    if (max_frames < 0) video_present(shown, g.gfx.scanlines); /* blocks on vsync */
     if (max_frames >= 0 && frames >= max_frames) {
         if (screenshot && save_screenshot(screenshot)) rc = 1;
         return false;
