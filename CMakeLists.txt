@@ -1,7 +1,7 @@
 # Native SDL2 Galaga for Linux handhelds and desktops (aarch64, x86_64),
 # Windows (MinGW), macOS and the web (Emscripten). See GALAGA_PORT_PLAN.md.
 cmake_minimum_required(VERSION 3.13)
-project(galaga VERSION 0.1.1 LANGUAGES C)
+project(galaga VERSION 0.1.2 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
