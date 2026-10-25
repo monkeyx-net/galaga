@@ -82,19 +82,27 @@ endif()
 set(GALAGA_ROM "${rom_default}" CACHE FILEPATH "The MAME galaga ROM set: galaga.zip or a folder")
 
 # Web build: emcmake cmake -S . -B build-web && cmake --build build-web --target serve
-# writes <build>/web/index.{html,js,wasm} and serves it on localhost. The ROM
-# set is never bundled; GALAGA_WEB_ROM can add the user's own for local play
-# only (do not publish such a build).
+# writes <build>/web/index.{html,js,wasm} and serves it on localhost. Neither
+# the ROM set nor the assets extracted from it are bundled unless asked, for
+# local play only (do not publish such a build): GALAGA_WEB_ROM adds the
+# user's galaga.zip (the game extracts it in the browser), GALAGA_WEB_ASSETS
+# an extracted asset folder (a native build's build/assets; the C game needs
+# nothing else).
 if(EMSCRIPTEN)
   set(GALAGA_WEB_ROM "" CACHE FILEPATH "Bundle this galaga.zip for LOCAL testing only")
+  set(GALAGA_WEB_ASSETS "" CACHE PATH "Bundle this extracted asset folder for LOCAL testing only")
   set(GALAGA_WEB_PORT 8000 CACHE STRING "Port for the serve target")
   set(web_preload)
   if(GALAGA_WEB_ROM)
     list(APPEND web_preload "SHELL:--preload-file '${GALAGA_WEB_ROM}@/galaga.zip'")
     message(WARNING "Web build bundles ${GALAGA_WEB_ROM}: for local use only, do not publish it")
   endif()
-  if(EXISTS "${CMAKE_SOURCE_DIR}/assets")
-    list(APPEND web_preload "SHELL:--preload-file '${CMAKE_SOURCE_DIR}/assets@/assets'")
+  if(GALAGA_WEB_ASSETS)
+    if(NOT EXISTS "${GALAGA_WEB_ASSETS}/manifest.txt")
+      message(FATAL_ERROR "GALAGA_WEB_ASSETS: no manifest.txt in ${GALAGA_WEB_ASSETS} (galaga --extract writes one)")
+    endif()
+    list(APPEND web_preload "SHELL:--preload-file '${GALAGA_WEB_ASSETS}@/assets'")
+    message(WARNING "Web build bundles the assets in ${GALAGA_WEB_ASSETS}: for local use only, do not publish it")
   endif()
   set(shell "${CMAKE_SOURCE_DIR}/src/web/shell.html")
   set_target_properties(galaga PROPERTIES
