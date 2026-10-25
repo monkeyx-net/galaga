@@ -37,7 +37,7 @@ the WSG and the 54xx's noise) is new.
    fire; every pad drives the panel. Select = coin, Start = 1P, L1+Start =
    2P, Select+L1 = graphics presets, hold Select+Start 1 s = exit.
    Keyboard: arrows left/right, Space/Ctrl fire, 5 coin, 1/Enter and 2
-   start, F3 presets, F4 glow, F5 scanlines, Esc exit. The DIP switches
+   start, F3 presets, F4 glow, F5 scanlines, F6 scale mode, F7 rotation, Esc exit. The DIP switches
    (rank, ships, coinage, bonus, cabinet, demo sound, freeze) come from a
    settings file (`galaga.cfg`) with MAME's defaults; an operator menu
    (F2, Select+R1) changes them while the game waits and saves the file.
@@ -45,7 +45,13 @@ the WSG and the 54xx's noise) is new.
    glow, scanlines), cosmetic only, classic by default. The screen is
    portrait (224x288, the monitor turned 90 degrees): integer scaling where
    it fills the screen, else fitted (640x480 handhelds: 1.667x, sharp
-   bilinear, pillarboxed); the scanlines run down the screen.
+   bilinear, pillarboxed); the scanlines run down the arcade's picture.
+   The scale mode (auto, integer, fit, stretch) and a rotation (90 or 270
+   clockwise, for a landscape device held on its side, the joystick
+   turned with it) are the player's: `--scale`, `--rotate`, F6/F7 or the
+   operator menu, kept in `galaga.cfg` (2026-10-25). Turned, 640x480 gets
+   an exact 2x (576x448), 1280x720 an exact 3x, 1920x1080 4.8x fitted;
+   720x720 stays 2.5x fitted whichever way.
 6. **The game in C.** The game logic is rewritten in C (`src/sim/`), from
    the ROM's behaviour (traces, probes, the disassembly MAME writes to
    `build/re`, never committed): each CPU's program whole, instruction by
@@ -347,6 +353,9 @@ asking.
 ## 4. Tests
 
 - `enhance` - always runs (scalers, presets, glow)
+- `screen` - always runs: the scale modes and rotations laid out on the
+  devices' screens (inside the screen, centred, integer scales on the
+  pixel grid), the joystick turned with the picture
 - `rom_load` - label `rom`: the set from the zip, from renamed copies in a
   folder (CRC matching), the device ROMs from their zips or the folder
   and optional, and a clean failure on an empty folder

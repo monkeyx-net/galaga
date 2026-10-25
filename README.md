@@ -38,8 +38,21 @@ every connected pad drives the panel.
 | Next graphics preset | Select + L1 | F3 |
 | Glow on / off | | F4 |
 | CRT scanlines on / off | | F5 |
+| Scale mode (auto, integer, fit, stretch) | operator menu | F6 |
+| Rotate the screen (0, 90, 270) | operator menu | F7 |
 | Operator menu (DIP switches) | Select + R1 | F2 |
 | Quit | hold Select + Start for 1 s | Esc |
+
+## Screen
+
+The picture is portrait (224x288, as the arcade's monitor was turned). By
+default it uses an integer scale when that fills the screen and is fitted
+otherwise, sharp but smoothed (`--scale auto`); `integer`, `fit` and
+`stretch` (the whole screen, the shape not kept) are the other modes. On a
+landscape screen, `--rotate 90` or `--rotate 270` turns the picture so the
+device can be held on its side, and the joystick turns with it: 640x480
+goes from 1.67x to an exact 2x, 1280x720 from 2.5x to 3x. Both are saved in
+`galaga.cfg` when changed with F6, F7 or the operator menu.
 
 ## Building
 

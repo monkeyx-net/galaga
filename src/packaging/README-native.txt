@@ -27,19 +27,27 @@ Controls (one control panel: the players take turns, as on the cabinet)
   Coin: Select / 5
   Start: Start / 1 or Enter;  2-player start: L1+Start / 2
   Graphics: Select+L1 / F3 steps the presets, F4 glow, F5 CRT scanlines
+  Screen: F6 scale mode, F7 rotation (also in the operator menu)
   Operator menu (the DIP switches): Select+R1 / F2
   Exit: hold Select+Start for 1 second / Esc
   Every connected pad drives the panel.
 
 Settings and saves
   galaga.cfg holds the DIP switches (difficulty, ships, bonus ship,
-  coinage, demo sounds, cabinet, freeze), MAME's defaults until changed;
+  coinage, demo sounds, cabinet, freeze), MAME's defaults until changed,
+  and the screen's scale mode and rotation;
   edit it or use the operator menu, which the game waits for. The cocktail
   cabinet turns the screen round for player two's turns. galaga.hiscore
   keeps the top five, which the arcade forgets at power-off. Both live in
   the save folder: $GALAGA_SAVE_DIR, else $XDG_DATA_HOME/galaga, else
   %APPDATA%\galaga on Windows, else ~/.local/share/galaga (PortMaster:
   conf/ in the port's folder).
+
+Screen (--scale <mode>, --rotate <degrees>)
+  auto (an integer scale when it fills the screen, else fitted), integer,
+  fit, stretch. --rotate 90 or 270 turns the picture (clockwise) for a
+  landscape device held on its side; the joystick turns with it. Saved in
+  galaga.cfg when changed in the game.
 
 Graphics presets (--gfx <preset>)
   classic, classic-crt, crisp, smooth, hd-crisp, hd-smooth, hd-glow, hd-glow-crt

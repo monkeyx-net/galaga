@@ -76,9 +76,11 @@ phases not yet done (see the plan's table) arrive with them.
   switches (`galaga.cfg`, the operator menu), the high scores
   (`galaga.hiscore`), the controls page
 - `platform/` - the only code that includes SDL: `video.c` (224x288
-  portrait framebuffer, integer scaling or fitted with sharp bilinear,
-  scanlines down the screen), `input.c` (Galaga's control panel; pads and
-  keyboard), `audio.c` (streams generated samples)
+  portrait framebuffer, laid out by `screen.c`: integer scaling, fitted
+  with sharp bilinear or stretched, turned 0/90/270; scanlines down the
+  arcade's picture), `input.c` (Galaga's control panel; pads and keyboard,
+  turned with the screen), `audio.c` (streams generated samples);
+  `screen.c` has no SDL (the scale modes, the rotation, the turned joystick)
 - `gfx/` - draws into the framebuffer in arcade coordinates (`fb.scale` > 1
   for HD): `fb.c`, `blit.c`, `scale.c` (Scale2x/3x, xBR), `enhance.c`
   (graphics presets, HD image registry, whole-frame filter, glow),
@@ -128,6 +130,8 @@ Every change keeps `ctest` green. Tests arrive with their phase (plan
 section 4).
 
 - `enhance` - always runs (scalers, presets, glow)
+- `screen` - always runs: the scale modes and rotations laid out on the
+  devices' screens, the joystick turned with the picture
 - `z80` - always runs: every opcode's T-states and machine cycles, known
   flag results, NMI, IM 1, HALT
 - `mb88` - always runs: the MB88xx opcodes' results, flags and cycles
